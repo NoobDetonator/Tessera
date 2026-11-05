@@ -1,0 +1,15 @@
+{
+  "name": "tessera-build",
+  "private": true,
+  "type": "module",
+  "description": "Local build and test tooling for the Tessera plugin. Also holds the pinned dsh used for smoke tests.",
+  "devDependencies": {
+    "@deepseek-ai/dsh": "0.2.2-rc.1",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "esbuild": "^0.25.0",
+    "playwright": "^1.50.0",
+    "pnpm": "11.28.5",
+    "typescript": "^5.8.0"
+  }
+}

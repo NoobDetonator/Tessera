@@ -1,0 +1,25 @@
+# secrets
+.env
+.env.*
+env.env
+*.env
+
+# vendored Harness source (read only reference)
+vendor/
+
+# dependencies and build output
+node_modules/
+tessera-build/node_modules/
+dist/
+*.tsbuildinfo
+
+# runtime
+.dsh/
+*.log
+test-results/
+
+# local test harness state (never leave this folder)
+.dsh-home/
+.test-run/
+tessera-build/.pw-browsers/
+tessera-plugin/lib/
