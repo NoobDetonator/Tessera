@@ -46,6 +46,10 @@ Boards are JSON Canvas files shown on an infinite canvas in the Tessera panel. U
 2. List the real gaps: unanswered questions, things referred to but never defined, sections with almost nothing in them.
 3. Add one \`note\` titled "What's missing" with \`tessera_create_cards\`, as a short checklist that names the specific cards involved. Omit x and y so it does not cover anything.
 
+## Clip something for later
+
+When the user asks you to save a link, reference or idea without saying where, add it to \`Inbox.canvas\` with \`tessera_create_cards\`. Use a \`link\` card for a URL, and a \`note\` for text. Omit x and y.
+
 ## Summarize a board
 
 1. Read the board, with \`depth: 1\` if it has nested boards.

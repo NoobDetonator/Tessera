@@ -25,6 +25,7 @@ export interface CardViewProps {
 export interface CardShell {
   openDocument(id: string): void
   openLightbox(id: string): void
+  openSketch(id: string): void
   enterBoard(path: string): void
   jumpToCard(id: string): void
 }

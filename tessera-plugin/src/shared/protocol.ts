@@ -4,6 +4,9 @@ import type { Change } from './change.ts'
 
 export const API_PREFIX = '/tessera/api'
 
+/** The board the agent clips links and media into. */
+export const INBOX_PATH = 'Inbox.canvas'
+
 export interface BoardInfo {
   path: string
   title: string

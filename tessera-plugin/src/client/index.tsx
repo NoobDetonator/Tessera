@@ -1,5 +1,5 @@
 /** Tessera's Client half: registers the panel and owns the store's lifetime. */
-import type { Context } from '@deepseek-ai/cordis'
+import type { ComponentType } from 'react'
 import { App, type T } from './App.tsx'
 import { Dialog } from './overlays.tsx'
 import { useTessera } from './store.ts'
@@ -47,8 +47,28 @@ function DeleteQuestion({ store, t }: { store: TesseraStore; t: T }): React.Reac
   )
 }
 
-/* eslint-disable @typescript-eslint/no-explicit-any -- the slot and locale services are typed by packages this bundle does not import at build time */
-export function apply(ctx: Context & Record<string, any>): void {
+interface SlotOptions {
+  name: string
+  key?: string
+  id?: string
+  order?: number
+  label?: () => string
+  locale?: string
+}
+
+/** The shell services this plugin uses. The packages declaring them are not build dependencies of this bundle. */
+interface ClientContext {
+  effect(callback: () => () => void, label?: string): unknown
+  inject(services: readonly string[], callback: (ctx: ClientContext) => void): unknown
+  slots: {
+    inject(name: string, register: () => unknown): unknown
+    register(options: SlotOptions, component: ComponentType<never>): unknown
+  }
+  locale: { register(namespace: string, dictionaries: Record<string, Record<string, string>>): () => void }
+  uiWorkspace: { startSession(workspaceId: undefined, options: { prompt: string; clearPreviousDraft: boolean }): void }
+}
+
+export function apply(ctx: ClientContext): void {
   ctx.effect(() => {
     const style = document.createElement('style')
     style.dataset.plugin = '@tessera/dsh-tessera'
@@ -63,7 +83,7 @@ export function apply(ctx: Context & Record<string, any>): void {
 
   // Opens a new chat with this text in the composer, ready for the user to add to and send.
   let askAgent: ((text: string) => void) | undefined
-  ctx.inject(['uiWorkspace'], (workspaceCtx: Context & Record<string, any>) => {
+  ctx.inject(['uiWorkspace'], (workspaceCtx) => {
     askAgent = (text) => { workspaceCtx.uiWorkspace.startSession(undefined, { prompt: text, clearPreviousDraft: true }) }
     workspaceCtx.effect(() => () => { askAgent = undefined }, 'tessera: ask the agent')
   })
@@ -85,7 +105,7 @@ export function apply(ctx: Context & Record<string, any>): void {
     name: 'sidebar.panellist',
     id: PANEL_ID,
     order: 10,
-    label: () => ctx.locale.t?.(NS, 'panel.title') ?? en['panel.title'],
+    label: () => en['panel.title'], // a product name, the same in every language
     locale: NS,
   }, ({ size }: { size?: number }) => <BoardsIcon size={size} />))
 }

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { boardRoutes, createApiHandler, EventHub, isLoopbackAuthority, isLoopbackBind } from '../src/host/http.ts'
+import { workspaceRoutes } from '../src/host/workspace.ts'
 import { BoardStore } from '../src/host/store.ts'
 
 const TOKEN = 'test-token-value'
@@ -22,7 +23,7 @@ before(async () => {
   const handler = createApiHandler({
     store, token: TOKEN,
     config: { maxJsonBytes: 1024, maxAssetBytes: 2048 },
-    routes: boardRoutes(store, hub),
+    routes: new Map([...boardRoutes(store, hub), ...workspaceRoutes(store, dir, () => undefined)]),
     warn: () => {},
   })
   server = createServer((req, res) => {
@@ -188,4 +189,31 @@ test('svg files carry a script-blocking policy', async () => {
   await writeFile(join(dir, 'pic.svg'), '<svg/>')
   const res = await call({ path: '/file/pic.svg' })
   assert.match(String(res.headers['content-security-policy']), /script-src 'none'/)
+})
+
+test('opening with the system app refuses anything that could run code', async () => {
+  for (const name of ['evil.exe', 'run.BAT', 'x.ps1', 'x.sh', 'x.lnk', 'x.html', 'x.svg', 'x.jar']) {
+    await writeFile(join(dir, name), 'x')
+    const res = await call({ method: 'POST', path: '/open', body: JSON.stringify({ path: name }) })
+    assert.equal(res.status, 403, name)
+  }
+  assert.equal((await call({ method: 'POST', path: '/open', body: JSON.stringify({ path: '../outside.pdf' }) })).status, 400)
+  assert.equal((await call({ method: 'POST', path: '/open', body: JSON.stringify({ path: 'missing.pdf' }) })).status, 404)
+})
+
+test('link previews say so when web access is unavailable', async () => {
+  const res = await call({ path: `/link-preview?url=${encodeURIComponent('https://example.com')}` })
+  assert.equal(res.status, 503)
+})
+
+test('search and templates answer over the bridge', async () => {
+  await writeFile(join(dir, 'found.canvas'), JSON.stringify({ nodes: [{ id: 'a', type: 'text', x: 0, y: 0, width: 1, height: 1, text: 'needle here' }] }))
+  const hits = JSON.parse((await call({ path: '/search?q=needle' })).body.toString())
+  assert.equal(hits.matches[0].board, 'found.canvas')
+  const templates = JSON.parse((await call({ path: '/templates' })).body.toString())
+  assert.equal(templates.builtin.length, 8)
+  const bad = await call({ method: 'POST', path: '/board/create', body: JSON.stringify({ title: 'x', template: 'nope' }) })
+  assert.equal(bad.status, 400)
+  const escape = await call({ method: 'POST', path: '/board/create', body: JSON.stringify({ title: 'x', template: 'saved:../../etc/passwd' }) })
+  assert.equal(escape.status, 400)
 })

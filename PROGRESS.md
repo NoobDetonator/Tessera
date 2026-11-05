@@ -2,7 +2,7 @@
 
 **Pinned Harness version:** `@deepseek-ai/dsh@0.2.2-rc.1` (tag `dsh-v0.2.2-rc.1`, the npm `latest` when work started).
 
-**Status:** Phases 1 to 5 done. Working on Phase 6.
+**Status:** All six phases are done, and every automated suite passes. A few things can only be checked by you; see "What needs you" below.
 
 Open items and assumptions are in [QUESTIONS.md](QUESTIONS.md). The design is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -15,7 +15,7 @@ Open items and assumptions are in [QUESTIONS.md](QUESTIONS.md). The design is in
 | 3. Structure | Done, tag `phase-3` | Browser checks in `e2e/phase-3.mjs`, including 2,000 cards |
 | 4. Agent tools, skill, Ask the agent | Done, tag `phase-4` | `e2e/phase-4.mjs` with the real model |
 | 5. Power features | Done, tag `phase-5` | Browser checks in `e2e/phase-5.mjs` |
-| 6. Extras | Next | |
+| 6. Extras | Done, tag `phase-6` | Browser checks in `e2e/phase-6.mjs`, `final.mjs`, `config.mjs` |
 
 ## Phase 1
 
@@ -114,6 +114,55 @@ These are from one run, so treat them as a rough indication. The 267 ms outlier 
 
 **Limitation:** backlinks only cover cards on the same board. A `[[link]]` to another board opens it, but that board's cards do not list it as a source.
 
+## Phase 6
+
+**Built:** Sketch (pen pressure, pen, marker and highlighter, eraser, stored as SVG and reopened for editing), presentation mode (frames full-screen, in order), focus mode, auto-layout in the UI (grid, tree, cluster), exports (PNG and SVG of the board or selection, Markdown outline, PDF through print), and the Inbox board.
+
+**Bugs the tests caught, now fixed:**
+- A small frame did not fill the screen when presenting, because the fit stopped at 100% zoom.
+
+**Found by reading the screenshots, now fixed:**
+- Neighboring frames could show at the edge of a slide. Only the current frame's contents are on screen now.
+
+## Final coverage pass
+
+`e2e/final.mjs` and `e2e/config.mjs` cover what the phase tests had not exercised in a browser:
+- space+drag, Z, wheel, synthetic pinch and trackpad
+- grid snap and Alt
+- Shift and box selection
+- align, distribute, color and fill
+- lock
+- the context menu by mouse and keyboard (the keyboard route was missing and is now added)
+- duplicate and nudging
+- file-picker upload
+- missing assets and unreadable files
+- sidebar search, favorites, rename and delete
+- dark theme, Portuguese and reduced motion
+- the README's config options through a real profile patch
+- automatic snapshots
+
+**Final results, on one machine:**
+
+| Suite | Result |
+|---|---|
+| Unit tests (`node --test`) | All pass |
+| Strict type check | Clean |
+| Browser suites without a model | 247 checks pass |
+| Real-model suites | 22 checks pass, on two runs |
+
+The real-model acceptance test passed on both runs, with the same three correct themes (45 s and 49 s). The automated suites have only ever run on this Windows machine in headless Chromium.
+
+## What needs you
+
+The tests cannot cover these:
+1. **Open boards in Obsidian.** This was always your check. Open `tessera/` itself as the vault (`QUESTIONS.md` Q7).
+2. **Open a real PDF** on a File card. Headless Chromium has no PDF viewer.
+3. **Try real gestures:** pinch and two-finger scroll on a trackpad, and a real stylus for pen pressure in Sketch.
+4. **Play a YouTube or Vimeo link,** and try "Open" on a generic File card.
+5. **Look through `QUESTIONS.md`.** Q1 (boards use `node:fs` instead of `ctx.fs`), Q6 (the Harness session log upload) and Q9 (preview images load directly) are the ones most worth a decision.
+
+The README lists every known limitation.
+
 ## Next step
 
-Phase 6: Sketch, presentation mode, focus mode, auto-layout UI, exports, Inbox.
+None planned. Tell me what you find in the checks above.

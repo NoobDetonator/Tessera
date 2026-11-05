@@ -26,11 +26,11 @@ export function summarize() {
   }
 }
 
-export async function launch({ name, port, withKey = false, env = {}, seed } = {}) {
+export async function launch({ name, port, withKey = false, env = {}, seed, args = [], boardsDir = 'tessera' } = {}) {
   installPlugin()
   const runDir = resolve(projectRoot, '.test-run', name)
   rmSync(runDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
-  const boards = join(runDir, 'tessera')
+  const boards = join(runDir, boardsDir)
   mkdirSync(boards, { recursive: true })
   if (seed) {
     for (const [file, content] of Object.entries(seed)) {
@@ -39,7 +39,7 @@ export async function launch({ name, port, withKey = false, env = {}, seed } = {
     }
   }
   // Without any key the shell blocks on a sign-in dialog. UI-only runs never call the model, so a placeholder is enough.
-  const run = startDsh({ port, runDir, withKey, env: withKey ? env : { DEEPSEEK_API_KEY: 'placeholder-not-a-real-key', ...env } })
+  const run = startDsh({ port, runDir, withKey, env: withKey ? env : { DEEPSEEK_API_KEY: 'placeholder-not-a-real-key', ...env }, args })
   const url = await run.url
   const browser = await chromium.launch()
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-US', colorScheme: 'light', permissions: ['clipboard-read', 'clipboard-write'] })

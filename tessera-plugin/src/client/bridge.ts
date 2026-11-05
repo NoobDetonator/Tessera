@@ -71,7 +71,6 @@ export const api = {
   apply: (body: { path: string; change: Change; clientId: string; label?: string; coalesce?: string; undoable?: boolean }) => post<{ rev: number }>('/board/apply', body),
   undo: (path: string) => post<{ rev: number | null; label?: string }>('/board/undo', { path }),
   redo: (path: string) => post<{ rev: number | null; label?: string }>('/board/redo', { path }),
-  seal: (path: string) => post<{ ok: boolean }>('/board/seal', { path }),
   createBoard: (title: string, options: { parent?: string; template?: string } = {}) => post<{ path: string }>('/board/create', { title, ...options }),
   renameBoard: (path: string, title: string) => post<{ path: string }>('/board/rename', { path, title }),
   deleteBoard: (path: string) => post<{ ok: boolean }>('/board/delete', { path }),

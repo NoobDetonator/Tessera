@@ -15,6 +15,11 @@ import { cardTitle, type CardShell } from './cards.tsx'
 import { addFiles, addLink, makeColor, makeDocument, makeNote, makeTodo, type Point } from './create.ts'
 import { Dialog, DocumentEditor, Lightbox, Toolbar } from './overlays.tsx'
 import { CommandPalette, GlobalSearch, HistoryPanel, NewBoardDialog, TagFilter, type Command } from './panels.tsx'
+import { LAYOUT_MODES, layoutChange, type LayoutMode } from '../shared/layout.ts'
+import { focusSet, presentationOrder } from '../shared/export.ts'
+import { INBOX_PATH } from '../shared/protocol.ts'
+import { exportImage, exportOutline, exportPdf } from './exporter.ts'
+import { Presentation, SketchEditor } from './extras.tsx'
 import { useTessera, type TesseraStore } from './store.ts'
 
 export type T = (key: string) => string
@@ -89,7 +94,7 @@ export function agentContext(store: TesseraStore): string {
 }
 
 /** Kinds on the left toolbar. */
-const TOOL_KINDS: readonly CardKind[] = ['note', 'document', 'todo', 'link', 'image', 'file', 'color', 'board', 'column', 'frame']
+const TOOL_KINDS: readonly CardKind[] = ['note', 'document', 'todo', 'link', 'image', 'file', 'color', 'sketch', 'board', 'column', 'frame']
 
 function Sidebar({ store, t, onNewBoard }: { store: TesseraStore; t: T; onNewBoard: () => void }): ReactNode {
   const boards = useTessera(store, state => state.boards)
@@ -110,16 +115,17 @@ function Sidebar({ store, t, onNewBoard }: { store: TesseraStore; t: T; onNewBoa
         if (next !== undefined && !seen.has(child)) walk(next, depth + 1, new Set([...seen, child]))
       }
     }
-    for (const board of boards) if (!childPaths.has(board.path)) walk(board, 0, new Set([board.path]))
+    for (const board of boards) if (!childPaths.has(board.path) && board.path !== INBOX_PATH) walk(board, 0, new Set([board.path]))
     // Boards only reachable through a cycle would otherwise vanish.
     const listed = new Set(out.map(row => row.board.path))
-    for (const board of boards) if (!listed.has(board.path)) out.push({ board, depth: 0 })
+    for (const board of boards) if (!listed.has(board.path) && board.path !== INBOX_PATH) out.push({ board, depth: 0 })
     return out
   }, [boards])
 
   const needle = query.trim().toLowerCase()
   const rows = needle === '' ? tree : boards.filter(board => board.title.toLowerCase().includes(needle)).map(board => ({ board, depth: 0 }))
   const favoriteRows = boards.filter(board => favorites.includes(board.path))
+  const inbox = boards.find(board => board.path === INBOX_PATH)
 
   const row = (board: BoardInfo, depth: number, key: string): ReactNode => (
     <div
@@ -156,6 +162,7 @@ function Sidebar({ store, t, onNewBoard }: { store: TesseraStore; t: T; onNewBoa
       </div>
       <input className="t-search" type="search" placeholder={t('sidebar.search')} aria-label={t('sidebar.search')} value={query} onChange={(event) => { setQuery(event.target.value) }} />
       <div className="t-tree" role="tree">
+        {inbox !== undefined && needle === '' ? row(inbox, 0, 'inbox') : null}
         {favoriteRows.length > 0 && needle === '' ? (
           <>
             <div className="t-tree-section">{t('sidebar.favorites')}</div>
@@ -222,7 +229,9 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
   const canvas = useRef<CanvasApi | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[] } | undefined>(undefined)
   const pointer = useRef({ x: 0, y: 0 })
-  const memoryClip = useRef<ClipboardCards | undefined>(undefined)
+  const toggleFocusRef = useRef<() => void>(() => {})
+  const openMenuRef = useRef<(event: { x: number; y: number; world: { x: number; y: number }; target?: string; edge?: string }) => void>(() => {})
+  const arrangeRef = useRef<(mode: LayoutMode) => void>(() => {})
   const dialog = useTessera(store, state => state.dialog)
   const [armed, setArmed] = useState<CardKind | undefined>(undefined)
   const [lightbox, setLightbox] = useState<string | undefined>(undefined)
@@ -230,20 +239,41 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
   const filePicker = useRef<HTMLInputElement>(null)
   const pickAt = useRef<Point>({ x: 0, y: 0 })
   const [mapView, setMapView] = useState<{ state: ViewState; width: number; height: number } | undefined>(undefined)
-  const hiddenIds = useMemo(() => (doc === undefined ? undefined : collapsedMembers(doc)), [doc])
+  const [slideId, setSlideId] = useState<string | undefined>(undefined)
+  const hiddenIds = useMemo(() => {
+    if (doc === undefined) return undefined
+    const hidden = collapsedMembers(doc)
+    const slide = slideId === undefined ? undefined : doc.nodes.find(node => node.id === slideId)
+    if (slide === undefined) return hidden
+    // Frames often sit side by side, and a neighbor must not show at the edge of a slide.
+    const shown = new Set([slide.id, ...groupDescendants(doc, slide).map(node => node.id)])
+    for (const node of doc.nodes) if (!shown.has(node.id)) hidden.add(node.id)
+    return hidden
+  }, [doc, slideId])
   const filterTags = useTessera(store, state => state.filterTags)
   const [newBoard, setNewBoard] = useState(false)
   const [searching, setSearching] = useState(false)
   const [commanding, setCommanding] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const focusMode = useTessera(store, state => state.focusMode)
+  const selection = useTessera(store, state => state.selection)
+  const [sketch, setSketch] = useState<{ id?: string; at?: Point } | undefined>(undefined)
+  const [presenting, setPresenting] = useState(false)
   const dimmedIds = useMemo(() => {
-    if (doc === undefined || filterTags.length === 0) return undefined
-    return new Set(doc.nodes.filter(node => !(node.tessera?.tags ?? []).some(tag => filterTags.includes(tag))).map(node => node.id))
-  }, [doc, filterTags])
+    if (doc === undefined) return undefined
+    const dimmed = new Set<string>()
+    if (filterTags.length > 0) for (const node of doc.nodes) if (!(node.tessera?.tags ?? []).some(tag => filterTags.includes(tag))) dimmed.add(node.id)
+    if (focusMode && selection.size > 0) {
+      const keep = focusSet(doc, selection)
+      for (const node of doc.nodes) if (!keep.has(node.id)) dimmed.add(node.id)
+    }
+    return dimmed.size === 0 ? undefined : dimmed
+  }, [doc, filterTags, focusMode, selection])
 
   const shell = useMemo<CardShell>(() => ({
     openDocument: (id) => { setDocumentId(id) },
     openLightbox: (id) => { setLightbox(id) },
+    openSketch: (id) => { setSketch({ id }) },
     enterBoard: (target) => { void store.open(target, [...store.state.breadcrumbs, target]) },
     jumpToCard: (id) => {
       const node = store.node(id)
@@ -336,6 +366,7 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
       case 'document': { const node = makeDocument(at); add(node, false); setDocumentId(node.id); return }
       case 'todo': add(makeTodo(at), false); return
       case 'color': add(makeColor(at), false); return
+      case 'sketch': setSketch({ at }); return
       case 'column': {
         const id = newId()
         const column: CanvasNode = { id, type: 'group', x: snapToGrid(at.x), y: snapToGrid(at.y), width: 280, height: COLUMN_HEAD + 12, tessera: { kind: 'column', items: [] } }
@@ -445,6 +476,7 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
       if (mod && key === 'k') { event.preventDefault(); setSearching(true); return }
       if (typing(event) || store.state.path === undefined) return
       if (key === '/' && !mod) { event.preventDefault(); setCommanding(true); return }
+      if (key === 'f' && !mod && !event.altKey) { event.preventDefault(); toggleFocusRef.current(); return }
       if (mod && key === 'z') { event.preventDefault(); void (event.shiftKey ? store.redo() : store.undo()); return }
       if (mod && key === 'y') { event.preventDefault(); void store.redo(); return }
       if (mod && event.code === 'Digit0') { event.preventDefault(); canvas.current?.fitAll(); return }
@@ -480,7 +512,17 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
         canvas.current?.centerOn(next)
         return
       }
+      if (key === 'contextmenu' || (event.shiftKey && key === 'f10')) {
+        event.preventDefault()
+        const id = [...store.state.selection][0]
+        const element = id === undefined ? undefined : document.querySelector<HTMLElement>(`[data-card-id="${id}"]`)
+        const box = element?.getBoundingClientRect()
+        const at = box === undefined ? { x: window.innerWidth / 2, y: window.innerHeight / 2 } : { x: box.left + 16, y: box.top + 16 }
+        openMenuRef.current({ ...at, world: canvas.current?.toWorld(at.x, at.y) ?? { x: 0, y: 0 }, ...(id !== undefined ? { target: id } : {}) })
+        return
+      }
       if (key === 'escape') {
+        if (store.state.focusMode) store.setFocusMode(false)
         store.setEditing(undefined)
         store.select(new Set())
         return
@@ -504,7 +546,6 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
       if (typing(event) || store.state.path === undefined) return
       const clip = clipOf()
       if (clip === undefined) return
-      memoryClip.current = clip
       event.clipboardData?.setData(CLIP_TYPE, JSON.stringify(clip))
       event.clipboardData?.setData('text/plain', clip.nodes.map(node => node.text ?? node.url ?? node.file ?? node.label ?? '').filter(Boolean).join('\n\n'))
       event.preventDefault()
@@ -577,11 +618,14 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
         },
         { label: t('menu.selectAll'), shortcut: 'Ctrl+A', onSelect: () => { store.select(new Set(store.state.doc?.nodes.map(node => node.id))) } },
         { label: t('menu.fit'), shortcut: 'Ctrl+0', onSelect: () => { canvas.current?.fitAll() } },
+        'separator',
+        ...LAYOUT_MODES.map((mode): MenuItem => ({ label: t(`layout.${mode}`), onSelect: () => { arrangeRef.current(mode) } })),
       )
     }
     setMenu({ x: event.x, y: event.y, entries })
   }, [store, t, clipOf, pasteCards, selectedCards, toggleLock, bringTo])
 
+  openMenuRef.current = openMenu
   const closeMenu = useCallback(() => { setMenu(undefined) }, [])
 
   const openHit = useCallback((board: string, id?: string) => {
@@ -611,6 +655,44 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
     })
   }, [store, t])
 
+  const arrange = useCallback((mode: LayoutMode) => {
+    const current = store.state.doc
+    if (current === undefined) return
+    const change = layoutChange(current, [...store.state.selection], mode)
+    if (Object.keys(change.nodes ?? {}).length > 0) store.commit(change, { label: t(`layout.${mode}`) })
+    setTimeout(() => { canvas.current?.fitAll() }, 50)
+  }, [store, t])
+
+  const toggleFocus = useCallback(() => {
+    if (!store.state.focusMode && store.state.selection.size === 0) { store.notify(t('focus.needSelection')); return }
+    store.setFocusMode(!store.state.focusMode)
+  }, [store, t])
+
+  const startPresentation = useCallback(() => {
+    const current = store.state.doc
+    if (current === undefined || presentationOrder(current).length === 0) { store.notify(t('present.noFrames')); return }
+    setPresenting(true)
+  }, [store, t])
+
+  const runExport = useCallback((job: () => Promise<void>) => {
+    job().catch((error: Error) => { store.notify(error.message) })
+  }, [store])
+
+  const moreEntries = useMemo<MenuEntry[]>(() => [
+    { label: t('present.start'), onSelect: startPresentation },
+    { label: t('focus.toggle'), shortcut: 'F', onSelect: toggleFocus },
+    'separator',
+    ...LAYOUT_MODES.map((mode): MenuItem => ({ label: t(`layout.${mode}`), onSelect: () => { arrange(mode) } })),
+    'separator',
+    { label: t('export.png'), onSelect: () => { runExport(() => exportImage(store, 'png', t)) } },
+    { label: t('export.svg'), onSelect: () => { runExport(() => exportImage(store, 'svg', t)) } },
+    { label: t('export.markdown'), onSelect: () => { runExport(() => exportOutline(store, t)) } },
+    { label: t('export.pdf'), onSelect: () => { runExport(() => exportPdf(store, t)) } },
+  ], [t, startPresentation, toggleFocus, arrange, runExport, store])
+
+  toggleFocusRef.current = toggleFocus
+  arrangeRef.current = arrange
+
   const commands = useMemo<Command[]>(() => {
     const center = (): Point => canvas.current?.screenCenter() ?? { x: 0, y: 0 }
     const hasBoard = path !== undefined
@@ -624,9 +706,17 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
       { id: 'select-all', label: t('menu.selectAll'), shortcut: 'Ctrl+A', disabled: !hasBoard, run: () => { store.select(new Set(store.state.doc?.nodes.map(node => node.id))) } },
       { id: 'history', label: t('history.title'), disabled: !hasBoard, run: () => { setHistoryOpen(true) } },
       { id: 'save-template', label: t('template.saveAs'), disabled: !hasBoard, run: saveTemplate },
+      { id: 'inbox', label: t('sidebar.inbox'), run: () => { void store.open(INBOX_PATH) } },
+      { id: 'present', label: t('present.start'), disabled: !hasBoard, run: startPresentation },
+      { id: 'focus', label: t('focus.toggle'), shortcut: 'F', disabled: !hasBoard, run: toggleFocus },
+      ...LAYOUT_MODES.map((mode): Command => ({ id: `layout-${mode}`, label: t(`layout.${mode}`), disabled: !hasBoard, run: () => { arrange(mode) } })),
+      { id: 'export-png', label: t('export.png'), disabled: !hasBoard, run: () => { runExport(() => exportImage(store, 'png', t)) } },
+      { id: 'export-svg', label: t('export.svg'), disabled: !hasBoard, run: () => { runExport(() => exportImage(store, 'svg', t)) } },
+      { id: 'export-md', label: t('export.markdown'), disabled: !hasBoard, run: () => { runExport(() => exportOutline(store, t)) } },
+      { id: 'export-pdf', label: t('export.pdf'), disabled: !hasBoard, run: () => { runExport(() => exportPdf(store, t)) } },
       { id: 'ask', label: t('top.ask'), disabled: !hasBoard, run: () => { askAgent(agentContext(store)) } },
     ]
-  }, [path, place, saveTemplate, store, t, askAgent])
+  }, [path, place, saveTemplate, store, t, askAgent, startPresentation, toggleFocus, arrange, runExport])
 
   if (!available) {
     return <div className="t-root"><div className="t-empty"><h2>{t('unavailable.title')}</h2><p>{t('unavailable.body')}</p></div></div>
@@ -635,7 +725,7 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
   const titleFor = (target: string): string => boards.find(board => board.path === target)?.title ?? target.replace(/\.canvas$/i, '')
 
   return (
-    <div className="t-root" data-testid="tessera-root">
+    <div className={`t-root${presenting ? ' t-presenting' : ''}`} data-testid="tessera-root">
       <Sidebar store={store} t={t} onNewBoard={() => { setNewBoard(true) }} />
       <main className="t-main">
         {path === undefined ? (
@@ -674,6 +764,16 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
                 title={t('top.ask')}
                 onClick={() => { askAgent(agentContext(store)) }}
               >✦ {t('top.ask')}</button>
+              <button
+                type="button"
+                className="t-btn"
+                data-testid="more-button"
+                aria-haspopup="menu"
+                onClick={(event) => {
+                  const box = event.currentTarget.getBoundingClientRect()
+                  setMenu({ x: box.right - 200, y: box.bottom + 4, entries: moreEntries })
+                }}
+              >{t('top.more')}</button>
               <span className="t-sep" />
               <button type="button" className="t-btn" disabled={!canUndo} aria-label={t('top.undo')} title={`${t('top.undo')} (Ctrl+Z)`} onClick={() => { void store.undo() }}>↶</button>
               <button type="button" className="t-btn" disabled={!canRedo} aria-label={t('top.redo')} title={`${t('top.redo')} (Ctrl+Shift+Z)`} onClick={() => { void store.redo() }}>↷</button>
@@ -726,6 +826,8 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
         {notice !== undefined ? <div className="t-banner" role="status">{notice}</div> : null}
       </main>
       {menu !== undefined ? <Menu x={menu.x} y={menu.y} entries={menu.entries} onClose={closeMenu} /> : null}
+      {sketch !== undefined ? <SketchEditor store={store} nodeId={sketch.id} at={sketch.at} t={t} onClose={() => { setSketch(undefined) }} /> : null}
+      {presenting ? <Presentation store={store} canvas={canvas} t={t} onSlide={setSlideId} onClose={() => { setPresenting(false) }} /> : null}
       {newBoard ? <NewBoardDialog store={store} t={t} onClose={() => { setNewBoard(false) }} /> : null}
       {searching ? <GlobalSearch t={t} onClose={() => { setSearching(false) }} onOpen={(hit) => { openHit(hit.board, hit.id) }} /> : null}
       {commanding ? <CommandPalette commands={commands} t={t} onClose={() => { setCommanding(false) }} /> : null}

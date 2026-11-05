@@ -6,7 +6,7 @@
  */
 import { EventEmitter } from 'node:events'
 import { existsSync, watch, type FSWatcher } from 'node:fs'
-import { copyFile, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { CanvasParseError, parseCanvas, serializeCanvas, type CanvasDoc } from '../shared/canvas.ts'
@@ -292,12 +292,6 @@ export class BoardStore extends EventEmitter<StoreEvents> {
     return board.rev
   }
 
-  /** Stop further changes from joining the current undo step, so the next edit starts a new one. */
-  sealUndo(path: string): void {
-    const top = this.boards.get(path)?.undo.at(-1)
-    if (top !== undefined) top.coalesce = undefined
-  }
-
   /**
    * Move cards to another board as one undo step on the source board.
    * @returns the ids moved.
@@ -523,11 +517,5 @@ export class BoardStore extends EventEmitter<StoreEvents> {
       if (error instanceof CanvasParseError || (error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
       throw error
     }
-  }
-
-  /** Modification time, for cache keys. */
-  async modified(path: string): Promise<number> {
-    const info = await stat(await this.resolveInside(path))
-    return info.mtimeMs
   }
 }

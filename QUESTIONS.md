@@ -18,7 +18,7 @@ These findings held up: the `main` and `sidebar.panellist` slots, `shell.overlay
 ## Open questions
 
 **Q1. Board files go through `node:fs`, not `ctx.fs`.** `ctx.fs` writes text only and watches a single directory level. Tessera needs binary assets and a recursive watch of the board tree, so one code path through `node:fs` (temp file plus rename) is simpler than two. Paths are confined to the board folder, and symlinks that point outside it are refused.
-- Consequence: a session in `read-only` sandbox mode can still change boards through the Tessera tools. See Q6 for how the tools treat this.
+- Because the `ctx.fs` sandbox never sees these writes, the Tessera tools check the session's mode themselves and refuse to change boards in `read-only` mode. That check is tested with the real model.
 
 **Q2. Where the token reaches the browser.** The per-process token goes into `window.__TESSERA__` through a `webserver/index-inject` row. The index response is already gated by the Harness browser cookie (`packages/host/frontend-static`), so only an authenticated browser receives it. Every request also has its `Host` and `Origin` checked to block DNS rebinding and cross-site requests. The route refuses to register when the server is bound to a non-loopback address.
 

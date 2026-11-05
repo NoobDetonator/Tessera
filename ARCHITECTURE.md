@@ -86,6 +86,18 @@ A Frame owns cards by geometry: the smallest group containing a card's center. I
 
 Moving cards to another board changes two files, so the undo entry on the source board carries the target board's inverse too. One undo restores both.
 
+## Files on disk
+
+| Path under the board folder | What it holds |
+|---|---|
+| `*.canvas` | One board each, in any subfolder. `Inbox.canvas` always exists |
+| `_assets/` | Uploads and sketches, named by content hash |
+| `_history/<board>/` | Named and automatic snapshots. `_history/corrupt/` keeps files that could not be parsed |
+| `_templates/` | Boards saved as templates |
+| `_tessera.json` | Favorites |
+
+A sketch is plain SVG. Each path also carries its raw stroke in a `data-stroke` attribute, so it reopens for editing. Saving writes a new asset and points the card at it, so board undo restores the earlier drawing.
+
 ## Testing
 
 | Command (from `tessera-build/`) | What it runs |

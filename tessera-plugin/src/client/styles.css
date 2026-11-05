@@ -462,3 +462,34 @@
 .t-backlinks { position: absolute; right: 6px; bottom: -11px; z-index: 2; }
 .t-backlinks-list { right: 0; top: calc(100% + 4px); }
 .t-backlinks .t-chip { box-shadow: 0 0 0 0.5px var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-1); }
+
+.t-edge { transition: opacity var(--t-fast) ease; }
+.t-edge-dimmed { opacity: 0.15; }
+.t-sketch { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+
+.t-sketch-editor { position: fixed; inset: 0; z-index: 1500; display: flex; flex-direction: column; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font-size: 13px; line-height: 20px; }
+.t-sketch-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 8px 12px; padding-top: max(8px, var(--dsh-frame-top-clearance, 0px)); border-bottom: 0.5px solid var(--dsw-alias-border-l2); }
+.t-sketch-tools .t-spacer { flex: 1; }
+.t-sketch-tools input[type="color"] { width: 28px; height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.t-sketch-tools input[type="range"] { width: 96px; }
+.t-sketch-area { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 16px; background: color-mix(in srgb, var(--dsw-alias-label-primary) 5%, var(--dsw-alias-bg-base)); }
+.t-sketch-area canvas { display: block; max-width: 100%; max-height: 100%; background: #ffffff; border-radius: var(--t-radius, 8px); box-shadow: 0 1px 4px rgb(0 0 0 / 16%); touch-action: none; cursor: crosshair; }
+
+/* Presenting covers the whole shell and leaves only the frame on screen. */
+.t-root.t-presenting { position: fixed; inset: 0; z-index: 1400; }
+.t-presenting .t-sidebar, .t-presenting .t-topbar, .t-presenting .t-toolbar, .t-presenting .t-minimap, .t-presenting .t-bar, .t-presenting .t-zoom-readout, .t-presenting .t-side { display: none; }
+.t-presenting .t-canvas { background-image: none; cursor: default; }
+.t-presenting .t-world { pointer-events: none; transition: transform var(--t-fast) ease; }
+.t-presenting .t-handle, .t-presenting .t-anchor { display: none; }
+.t-presenter-bar { position: fixed; left: 50%; bottom: 16px; z-index: 1450; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: var(--t-radius); background: var(--dsw-alias-bg-layer-1); box-shadow: var(--dsw-elevation-panel, 0 4px 16px rgb(0 0 0 / 16%)); opacity: 0.35; transition: opacity var(--t-fast) ease; }
+.t-presenter-bar:hover, .t-presenter-bar:focus-within { opacity: 1; }
+.t-presenter-count { padding: 0 8px; font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-secondary); }
+
+.t-print { display: none; }
+@media print {
+  @page { margin: 12mm; }
+  html, body { height: auto !important; overflow: visible !important; background: #ffffff !important; }
+  body > *:not(.t-print) { display: none !important; }
+  .t-print { display: block !important; }
+  .t-print svg { display: block; width: 100%; height: auto; }
+}

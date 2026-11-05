@@ -11,7 +11,7 @@ import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-session'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
-import { API_PREFIX, BOOT_GLOBAL, type BootGlobals } from '../shared/protocol.ts'
+import { API_PREFIX, BOOT_GLOBAL, INBOX_PATH, type BootGlobals } from '../shared/protocol.ts'
 import { boardRoutes, createApiHandler, EventHub, isLoopbackBind } from './http.ts'
 import type { WebFetcher } from './linkpreview.ts'
 import { workspaceRoutes } from './workspace.ts'
@@ -51,6 +51,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const root = resolve(config.root)
   const store = new BoardStore(root, config.saveDebounceMs)
   await store.start((message) => { ctx.logger.warn(message) })
+  if (!await store.exists(INBOX_PATH)) await store.create(INBOX_PATH, { nodes: [], edges: [] })
   ctx.effect(() => () => store.stop(), 'tessera: board store')
 
   const hub = new EventHub()

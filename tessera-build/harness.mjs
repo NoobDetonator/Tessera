@@ -48,7 +48,7 @@ export function installPlugin() {
 /** Starts `dsh --profile web`; resolves with the tokenized URL once the server prints it. */
 export function startDsh({ port = 3180, runDir = defaultRunDir, env = {}, withKey = false, args = [] } = {}) {
   mkdirSync(runDir, { recursive: true })
-  const child = spawn(process.execPath, [bin, '--profile', 'web', '--no-open', '--port', String(port), ...args], {
+  const child = spawn(process.execPath, [bin, '--profile', 'web', ...args, '--no-open', '--port', String(port)], {
     cwd: runDir,
     env: containedEnv({ ...(withKey ? apiKeyEnv() : {}), ...env }),
     stdio: ['ignore', 'pipe', 'pipe'],

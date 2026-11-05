@@ -357,10 +357,6 @@ export function boardRoutes(store: BoardStore, hub: EventHub): Map<string, Route
     const moved = await store.transfer(normalizeBoardPath(body.from), normalizeBoardPath(body.to), body.ids as string[], { origin: 'user', label: 'Move to board' })
     return { moved }
   })
-  routes.set('POST /board/seal', async ({ json }) => {
-    store.sealUndo(normalizeBoardPath((await json()).path))
-    return { ok: true }
-  })
   return routes
 }
 

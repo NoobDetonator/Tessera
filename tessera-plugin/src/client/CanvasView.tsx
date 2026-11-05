@@ -22,7 +22,8 @@ export interface ViewState { x: number; y: number; z: number }
 
 export interface CanvasApi {
   fitAll(): void
-  fitRects(rects: readonly Rect[]): void
+  /** @param maxZoom - how far to enlarge small content. Defaults to actual size. */
+  fitRects(rects: readonly Rect[], maxZoom?: number): void
   centerOn(rect: Rect): void
   zoomBy(factor: number): void
   screenCenter(): { x: number; y: number }
@@ -186,12 +187,13 @@ interface EdgeLayerProps {
   edges: readonly CanvasEdge[]
   rects: (id: string) => Rect | undefined
   selected: string | undefined
+  dimmed: ReadonlySet<string> | undefined
   draft: { d: string } | undefined
   onSelect: (id: string, event: React.PointerEvent) => void
   onLabel: (id: string) => void
 }
 
-const EdgeLayer = memo(function EdgeLayer({ edges, rects, selected, draft, onSelect, onLabel }: EdgeLayerProps) {
+const EdgeLayer = memo(function EdgeLayer({ edges, rects, selected, dimmed, draft, onSelect, onLabel }: EdgeLayerProps) {
   return (
     <svg className="t-edges" aria-hidden="true">
       {edges.map((edge) => {
@@ -207,7 +209,7 @@ const EdgeLayer = memo(function EdgeLayer({ edges, rects, selected, draft, onSel
           return `M${point.x} ${point.y}L${point.x + Math.cos(a) * size} ${point.y + Math.sin(a) * size}L${point.x + Math.cos(b) * size} ${point.y + Math.sin(b) * size}Z`
         }
         return (
-          <g key={edge.id} className={edge.id === selected ? 't-edge t-edge-selected' : 't-edge'} data-edge-id={edge.id}>
+          <g key={edge.id} className={`t-edge${edge.id === selected ? ' t-edge-selected' : ''}${dimmed?.has(edge.fromNode) === true || dimmed?.has(edge.toNode) === true ? ' t-edge-dimmed' : ''}`} data-edge-id={edge.id}>
             <path className="t-edge-hit" d={route.d} onPointerDown={(event) => { onSelect(edge.id, event) }} onDoubleClick={(event) => { event.stopPropagation(); onLabel(edge.id) }} />
             <path className="t-edge-line" d={route.d} style={{ stroke: color, strokeDasharray: edge.tessera?.dashed === true ? '6 6' : undefined }} />
             {toArrow ? <path d={arrow(route.end, route.endAngle)} style={{ fill: color }} /> : null}
@@ -239,13 +241,11 @@ export interface CanvasViewProps {
   dimmedIds?: ReadonlySet<string> | undefined
   hiddenIds?: ReadonlySet<string> | undefined
   placeKind?: { active: boolean; place: (world: { x: number; y: number }) => void } | undefined
-  /** Rewrites a live-dragged set of rects, for column reordering previews. */
-  afterMove?: (ids: readonly string[]) => void
   /** Dropped OS files or dragged-in URLs. */
   onDropData?: (data: DataTransfer, world: { x: number; y: number }) => void
 }
 
-export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards, dropTargetAt, onViewChange, dimmedIds, hiddenIds, placeKind, afterMove, onDropData }: CanvasViewProps): ReactNode {
+export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards, dropTargetAt, onViewChange, dimmedIds, hiddenIds, placeKind, onDropData }: CanvasViewProps): ReactNode {
   const doc = useTessera(store, state => state.doc)
   const path = useTessera(store, state => state.path)
   const selection = useTessera(store, state => state.selection)
@@ -331,7 +331,7 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
     applyView()
   }, [applyView])
 
-  const fitRects = useCallback((rects: readonly Rect[]) => {
+  const fitRects = useCallback((rects: readonly Rect[], maxZoom = 1) => {
     const root = rootRef.current
     const box2 = boundsOf(rects)
     if (root === null || box2 === undefined) {
@@ -340,7 +340,7 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
       return
     }
     const pad = 64
-    const z = Math.min(1, Math.max(MIN_ZOOM, Math.min((root.clientWidth - pad * 2) / Math.max(1, box2.width), (root.clientHeight - pad * 2) / Math.max(1, box2.height))))
+    const z = Math.min(maxZoom, Math.max(MIN_ZOOM, Math.min((root.clientWidth - pad * 2) / Math.max(1, box2.width), (root.clientHeight - pad * 2) / Math.max(1, box2.height))))
     view.current = {
       x: (root.clientWidth - box2.width * z) / 2 - box2.x * z,
       y: (root.clientHeight - box2.height * z) / 2 - box2.y * z,
@@ -447,7 +447,7 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
 
   const rectIndex = useMemo(() => new Map(doc?.nodes.map(node => [node.id, visualRect(node)]) ?? []), [doc])
   const rectLookup = useCallback((id: string): Rect | undefined => overrides.get(id) ?? rectIndex.get(id), [overrides, rectIndex])
-  // The minimap and edge layer care about what is drawn, so a collapsed column counts as its header.
+
 
   const finishEdge = useCallback((target: HTMLElement | null, from: string, fromSide: EdgeSide) => {
     const cardElement = target?.closest<HTMLElement>('[data-card-id]') ?? null
@@ -660,7 +660,6 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
         }
         if (Object.keys(nodes).length > 0) store.commit({ nodes }, { label: 'Move' })
         setOverrides(new Map())
-        afterMove?.(state.ids)
         return
       }
       case 'resize': {
@@ -691,6 +690,7 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
       if (kind === 'document') { shell.openDocument(id); return }
       if (kind === 'board' && typeof node.file === 'string') { shell.enterBoard(node.file); return }
       if (kind === 'image') { shell.openLightbox(id); return }
+      if (kind === 'sketch') { shell.openSketch(id); return }
       if (cardTypeOf(kind).editable === true) store.setEditing(id)
       return
     }
@@ -784,7 +784,7 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
       }}
     >
       <div ref={worldRef} className="t-world">
-        <EdgeLayer edges={visibleEdges} rects={rectLookup} selected={selectedEdge} draft={edgeDraft} onSelect={onSelectEdge} onLabel={onEdgeLabel} />
+        <EdgeLayer edges={visibleEdges} rects={rectLookup} selected={selectedEdge} dimmed={dimmedIds} draft={edgeDraft} onSelect={onSelectEdge} onLabel={onEdgeLabel} />
         {doc !== undefined ? visibleNodes.map((node) => {
           const live = overrides.get(node.id)
           return (

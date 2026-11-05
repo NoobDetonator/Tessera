@@ -454,6 +454,13 @@ const BoardView = memo(function BoardView({ node, store, t }: CardViewProps) {
   )
 })
 
+const SketchView = memo(function SketchView({ node, t }: CardViewProps) {
+  const [broken, setBroken] = useState(false)
+  if (typeof node.file !== 'string' || broken) return <div className="t-missing"><span>{t('card.missingFile')}</span></div>
+  return <img className="t-sketch" src={fileUrl(node.file)} alt={t('card.sketch')} draggable={false} onError={() => { setBroken(true) }} />
+})
+
+registerCard({ kind: 'sketch', label: 'card.sketch', minWidth: 80, minHeight: 80, autoHeight: false, view: SketchView })
 registerCard({ kind: 'frame', label: 'card.frame', minWidth: 120, minHeight: 80, autoHeight: false, editable: true, view: FrameView })
 registerCard({ kind: 'column', label: 'card.column', minWidth: 160, minHeight: 44, autoHeight: false, editable: true, widthOnly: true, view: ColumnView })
 registerCard({ kind: 'board', label: 'card.board', minWidth: 160, minHeight: 120, autoHeight: false, view: BoardView })

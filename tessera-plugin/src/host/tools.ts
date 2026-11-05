@@ -334,7 +334,7 @@ export function toolSpecs(deps: ToolDeps): ToolSpec[] {
     },
     {
       name: 'tessera_create_cards',
-      description: `Add cards to a board. Each card has a kind (${CREATABLE.join(', ')}; default note) and, as fits the kind: text, title, url, file, caption, color, tags, x, y, width, height. Cards without both x and y are placed automatically without overlapping anything. A todo card takes one item per line of text. A color card takes a hex color as text. Returns the new ids.`,
+      description: `Add cards to a board. Each card has a kind (${CREATABLE.join(', ')}; default note) and, as fits the kind: text, title, url, file, caption, color, tags, x, y, width, height. Cards without both x and y are placed automatically without overlapping anything. A todo card takes one item per line of text. A color card takes a hex color as text. Returns the new ids. Links and notes to keep for later go on the Inbox board, Inbox.canvas.`,
       parameters: {
         path: { type: 'string', required: true },
         cards: { type: 'array', required: true, items: openObject, description: 'The cards to add, at most 200.' },
