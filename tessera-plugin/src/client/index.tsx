@@ -1,6 +1,8 @@
 /** Tessera's Client half: registers the panel and owns the store's lifetime. */
 import type { Context } from '@deepseek-ai/cordis'
 import { App, type T } from './App.tsx'
+import { Dialog } from './overlays.tsx'
+import { useTessera } from './store.ts'
 import { en, pt, zh } from './i18n.ts'
 import { TesseraStore } from './store.ts'
 import './cardviews.tsx'
@@ -23,6 +25,28 @@ function BoardsIcon({ size }: { size?: number }): React.ReactNode {
   )
 }
 
+function DeleteQuestion({ store, t }: { store: TesseraStore; t: T }): React.ReactNode {
+  const request = useTessera(store, state => state.confirms[0])
+  if (request === undefined) return null
+  const board = request.path.replace(/\.canvas$/i, '')
+  const list = request.titles.map(title => `• ${title}`).join('\n')
+  const more = request.ids.length > request.titles.length ? `\n… +${request.ids.length - request.titles.length}` : ''
+  return (
+    <Dialog
+      key={request.id}
+      t={t}
+      request={{
+        title: t('confirm.agentDelete').replace('{count}', String(request.ids.length)).replace('{board}', board),
+        message: `${list}${more}`,
+        input: false,
+        danger: true,
+        confirmLabel: t('menu.delete'),
+      }}
+      onClose={(value) => { void store.answerConfirm(request.id, value !== null) }}
+    />
+  )
+}
+
 /* eslint-disable @typescript-eslint/no-explicit-any -- the slot and locale services are typed by packages this bundle does not import at build time */
 export function apply(ctx: Context & Record<string, any>): void {
   ctx.effect(() => {
@@ -37,11 +61,25 @@ export function apply(ctx: Context & Record<string, any>): void {
   const store = new TesseraStore()
   ctx.effect(() => store.start(), 'tessera: store')
 
+  // Opens a new chat with this text in the composer, ready for the user to add to and send.
+  let askAgent: ((text: string) => void) | undefined
+  ctx.inject(['uiWorkspace'], (workspaceCtx: Context & Record<string, any>) => {
+    askAgent = (text) => { workspaceCtx.uiWorkspace.startSession(undefined, { prompt: text, clearPreviousDraft: true }) }
+    workspaceCtx.effect(() => () => { askAgent = undefined }, 'tessera: ask the agent')
+  })
+
   ctx.slots.inject('main', () => ctx.slots.register({
     name: 'main',
     key: PANEL_ID,
     locale: NS,
-  }, ({ t }: { t: T }) => <App store={store} t={t} />))
+  }, ({ t }: { t: T }) => <App store={store} t={t} askAgent={(text) => { askAgent?.(text) }} />))
+
+  // The agent usually runs while the chat is showing, so a delete question must appear over any panel.
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+    name: 'shell.overlay',
+    id: 'tessera-confirm',
+    locale: NS,
+  }, ({ t }: { t: T }) => <DeleteQuestion store={store} t={t} />))
 
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
     name: 'sidebar.panellist',

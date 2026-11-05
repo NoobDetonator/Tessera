@@ -2,7 +2,7 @@
 
 **Pinned Harness version:** `@deepseek-ai/dsh@0.2.2-rc.1` (tag `dsh-v0.2.2-rc.1`, the npm `latest` when work started).
 
-**Status:** Phases 1 to 3 done. Working on Phase 4.
+**Status:** Phases 1 to 4 done. Working on Phase 5.
 
 Open items and assumptions are in [QUESTIONS.md](QUESTIONS.md). The design is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -13,8 +13,8 @@ Open items and assumptions are in [QUESTIONS.md](QUESTIONS.md). The design is in
 | 1. Foundations | Done, tag `phase-1` | Browser checks in `e2e/phase-1.mjs` |
 | 2. Card types | Done, tag `phase-2` | Browser checks in `e2e/phase-2.mjs` |
 | 3. Structure | Done, tag `phase-3` | Browser checks in `e2e/phase-3.mjs`, including 2,000 cards |
-| 4. Agent tools, skill, Ask the agent | Next | |
-| 5. Power features | Not started | |
+| 4. Agent tools, skill, Ask the agent | Done, tag `phase-4` | `e2e/phase-4.mjs` with the real model |
+| 5. Power features | Next | |
 | 6. Extras | Not started | |
 
 ## Phase 1
@@ -81,6 +81,25 @@ These are from one run, so treat them as a rough indication. The 267 ms outlier 
 - Pinch zoom and trackpad panning on real hardware. The tests send synthetic wheel events.
 - Double-click on a Color card opening the system color picker. The picker is an OS dialog the test cannot see.
 
+## Phase 4
+
+**Built:** all eleven `tessera_*` tools with output schemas, the `tessera-boards` skill with the five workflows, the "Ask the agent" button, and a delete confirmation that appears over any panel. To support the tools, this phase also added auto-layout, search, version history and the eight built-in templates on the Host; their UI comes in Phases 5 and 6.
+
+**Acceptance test, real model (DeepSeek V4.1 Flash, `deepseek-flash`), run through the Web UI:**
+- A shuffled, overlapping board of 30 cards from 3 subjects, organized in about 45 seconds.
+- The model made three frames: Cooking, Gardening and Astronomy, each with exactly its 10 cards. That sort quality is the model's, from one run, so another run could differ.
+- No card lost, no text changed, every card in exactly one frame, and the file passes the strict validator.
+- **One undo removed all three frames and put all 30 cards back at their exact coordinates.** Redo brought it all back.
+
+**Also tested with the real model:** a delete asks in a dialog over the chat, declining keeps the card, approving removes it. A session in read-only mode could not change a board. The skill appears in the chat's slash menu.
+
+**How one undo covers a whole turn:** every edit in one agent turn shares an undo key taken from the Harness's `turn/start` event. Editing yourself in between starts a new step.
+
+**Limitations:**
+- Undoing a "group as board" empties the new nested board but leaves its file. Only the board's cards are undone.
+- A Link card the agent creates shows no preview until you click "Load preview", so the agent adding links causes no network calls.
+- The other four skill workflows are written but were not run against the model.
+
 ## Next step
 
-Phase 4: the eleven agent tools, the skill, "Ask the agent", and the end-to-end test with the real model.
+Phase 5: search, command palette, tags and filters, templates, backlinks, version history UI.

@@ -11,7 +11,7 @@ import type { Change } from '../shared/change.ts'
 import type { BoardInfo } from '../shared/protocol.ts'
 import { snapToGrid } from '../shared/geometry.ts'
 import { CanvasView, type CanvasApi, type ViewState } from './CanvasView.tsx'
-import type { CardShell } from './cards.tsx'
+import { cardTitle, type CardShell } from './cards.tsx'
 import { addFiles, addLink, makeColor, makeDocument, makeNote, makeTodo, type Point } from './create.ts'
 import { Dialog, DocumentEditor, Lightbox, Toolbar } from './overlays.tsx'
 import { useTessera, type TesseraStore } from './store.ts'
@@ -77,6 +77,20 @@ function Menu({ x, y, entries, onClose }: { x: number; y: number; entries: reado
 async function askNewBoard(store: TesseraStore, t: T): Promise<void> {
   const title = await store.ask({ title: t('sidebar.new'), placeholder: t('prompt.boardTitle') })
   if (title !== null && title.trim() !== '') await store.createBoard(title.trim())
+}
+
+/** The text an "Ask the agent" chat starts with: which board, and which cards. */
+export function agentContext(store: TesseraStore): string {
+  const { path, doc, selection } = store.state
+  if (path === undefined) return ''
+  const lines = [`Tessera board: ${path}`]
+  const cards = doc?.nodes.filter(node => selection.has(node.id)) ?? []
+  if (cards.length > 0) {
+    lines.push(`Selected cards (${cards.length}):`)
+    for (const card of cards.slice(0, 40)) lines.push(`- ${card.id}: ${cardTitle(card) || card.type}`)
+    if (cards.length > 40) lines.push(`- and ${cards.length - 40} more`)
+  }
+  return `${lines.join('\n')}\n\n`
 }
 
 /** Kinds on the left toolbar. */
@@ -199,7 +213,7 @@ interface ClipboardCards { nodes: CanvasNode[]; edges: CanvasEdge[] }
 
 const CLIP_TYPE = 'application/x-tessera-cards'
 
-export function App({ store, t }: { store: TesseraStore; t: T }): ReactNode {
+export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgent: (text: string) => void }): ReactNode {
   const available = useTessera(store, state => state.available)
   const path = useTessera(store, state => state.path)
   const doc = useTessera(store, state => state.doc)
@@ -601,6 +615,13 @@ export function App({ store, t }: { store: TesseraStore; t: T }): ReactNode {
                 ))}
               </nav>
               <SaveStatus store={store} t={t} />
+              <button
+                type="button"
+                className="t-btn"
+                data-testid="ask-agent"
+                title={t('top.ask')}
+                onClick={() => { askAgent(agentContext(store)) }}
+              >✦ {t('top.ask')}</button>
               <span className="t-sep" />
               <button type="button" className="t-btn" disabled={!canUndo} aria-label={t('top.undo')} title={`${t('top.undo')} (Ctrl+Z)`} onClick={() => { void store.undo() }}>↶</button>
               <button type="button" className="t-btn" disabled={!canRedo} aria-label={t('top.redo')} title={`${t('top.redo')} (Ctrl+Shift+Z)`} onClick={() => { void store.redo() }}>↷</button>

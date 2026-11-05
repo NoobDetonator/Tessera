@@ -41,8 +41,8 @@ interface UndoEntry {
   forward: Change
   label: string | undefined
   coalesce: string | undefined
-  /** A second board this step also changed, so one undo restores both. */
-  linked?: { path: string; inverse: Change; forward: Change }
+  /** Other boards this step also changed, in the order they changed, so one undo restores them all. */
+  linked?: Array<{ path: string; inverse: Change; forward: Change }>
 }
 
 interface OpenBoard {
@@ -320,7 +320,7 @@ export class BoardStore extends EventEmitter<StoreEvents> {
     await this.apply(to, change, { ...meta, undoable: false })
     await this.apply(from, removal, meta)
     const top = source.undo.at(-1)
-    if (top !== undefined) top.linked = { path: to, inverse, forward: change }
+    if (top !== undefined) (top.linked ??= []).push({ path: to, inverse, forward: change })
     return nodes.map(node => node.id)
   }
 
@@ -334,7 +334,7 @@ export class BoardStore extends EventEmitter<StoreEvents> {
     board.rev++
     this.emit('change', { path, rev: board.rev, change: entry.inverse, origin: 'history', label: entry.label })
     this.schedule(board)
-    if (entry.linked !== undefined) await this.apply(entry.linked.path, entry.linked.inverse, { origin: 'history', undoable: false })
+    for (const linked of [...(entry.linked ?? [])].reverse()) await this.apply(linked.path, linked.inverse, { origin: 'history', undoable: false })
     return { rev: board.rev, label: entry.label }
   }
 
@@ -348,7 +348,7 @@ export class BoardStore extends EventEmitter<StoreEvents> {
     board.rev++
     this.emit('change', { path, rev: board.rev, change: entry.forward, origin: 'history', label: entry.label })
     this.schedule(board)
-    if (entry.linked !== undefined) await this.apply(entry.linked.path, entry.linked.forward, { origin: 'history', undoable: false })
+    for (const linked of entry.linked ?? []) await this.apply(linked.path, linked.forward, { origin: 'history', undoable: false })
     return { rev: board.rev, label: entry.label }
   }
 

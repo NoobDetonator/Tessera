@@ -5,7 +5,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, type ComponentType, type ReactNode } from 'react'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import { newId, type CanvasDoc, type CanvasNode, type CardKind } from '../shared/canvas.ts'
+import { cardTitle } from '../shared/search.ts'
 import type { TesseraStore } from './store.ts'
+
+export { cardTitle }
 
 export interface CardViewProps {
   node: CanvasNode
@@ -69,19 +72,6 @@ export function resolveCardName(doc: CanvasDoc, name: string): CanvasNode | unde
   const wanted = name.trim().toLowerCase()
   return doc.nodes.find(node => node.id === name)
     ?? doc.nodes.find(node => cardTitle(node).toLowerCase() === wanted)
-}
-
-/** A short human name for a card. */
-export function cardTitle(node: CanvasNode): string {
-  if (typeof node.tessera?.title === 'string' && node.tessera.title !== '') return node.tessera.title
-  if (typeof node.label === 'string' && node.label !== '') return node.label
-  if (typeof node.text === 'string') {
-    const first = node.text.split('\n').find(line => line.trim() !== '') ?? ''
-    return first.replace(/^#+\s*/, '').replace(/^\s*[-*+] \[[ xX]\]\s*/, '').trim().slice(0, 80)
-  }
-  if (typeof node.file === 'string') return node.file.slice(node.file.lastIndexOf('/') + 1).replace(/\.canvas$/i, '')
-  if (typeof node.url === 'string') return node.url
-  return ''
 }
 
 function TextEditor({ node, store, field = 'text' }: { node: CanvasNode; store: TesseraStore; field?: 'text' }): ReactNode {

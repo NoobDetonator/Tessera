@@ -6,14 +6,22 @@ import { randomBytes } from 'node:crypto'
 import { resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+import type {} from '@deepseek-ai/dsh-skill'
+import type {} from '@deepseek-ai/dsh-sandbox-policy'
+import type {} from '@deepseek-ai/dsh-session'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
 import { API_PREFIX, BOOT_GLOBAL, type BootGlobals } from '../shared/protocol.ts'
 import { boardRoutes, createApiHandler, EventHub, isLoopbackBind } from './http.ts'
 import type { WebFetcher } from './linkpreview.ts'
 import { workspaceRoutes } from './workspace.ts'
-import { BoardStore } from './store.ts'
+import { HistoryStore } from './history.ts'
+import { SKILL_CONTENT, SKILL_DESCRIPTION, SKILL_NAME } from './skill.ts'
+import { BoardStore, normalizeBoardPath, TesseraError } from './store.ts'
+import { guardReadOnly, toolSpecs, type SandboxPolicyReader, type ToolRun } from './tools.ts'
 
 export const name = 'tessera'
+export const inject = ['tools']
 
 export interface Config {
   /** Board folder. Relative paths resolve against the directory dsh started in. */
@@ -24,6 +32,8 @@ export interface Config {
   maxAssetBytes: number
   /** Largest JSON request body. */
   maxJsonBytes: number
+  /** How long a delete waits for the user before counting as declined. */
+  confirmTimeoutMs: number
 }
 
 export const Config: z<Config> = z.object({
@@ -31,6 +41,7 @@ export const Config: z<Config> = z.object({
   saveDebounceMs: z.natural().default(500),
   maxAssetBytes: z.natural().min(1).default(1024 * 1024 * 1024),
   maxJsonBytes: z.natural().min(1).default(64 * 1024 * 1024),
+  confirmTimeoutMs: z.natural().min(1000).default(120_000),
 })
 
 export async function apply(ctx: Context, config: Config): Promise<void> {
@@ -62,6 +73,55 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   store.on('boards-changed', () => { hub.broadcast({ type: 'boards-changed' }) })
   store.on('board-removed', (event) => { hub.broadcast({ type: 'board-removed', ...event }) })
 
+  const history = new HistoryStore(store, root)
+
+  // Delete confirmations: a question to whichever tab answers first.
+  const waiting = new Map<string, (approved: boolean) => void>()
+  const confirm = ({ path, ids, titles, signal }: { path: string; ids: string[]; titles: string[]; signal?: AbortSignal | undefined }): Promise<boolean> => {
+    if (hub.size === 0) throw new TesseraError('no-ui', 'Deleting cards needs the user to confirm, but no Harness window is open. Ask the user to open the Web UI and try again.', 409)
+    const id = randomBytes(8).toString('hex')
+    return new Promise<boolean>((done) => {
+      const finish = (approved: boolean): void => {
+        waiting.delete(id)
+        clearTimeout(timer)
+        signal?.removeEventListener('abort', onAbort)
+        hub.broadcast({ type: 'confirm-resolved', id })
+        done(approved)
+      }
+      const onAbort = (): void => { finish(false) }
+      const timer = setTimeout(() => { finish(false) }, config.confirmTimeoutMs)
+      signal?.addEventListener('abort', onAbort, { once: true })
+      waiting.set(id, finish)
+      hub.broadcast({ type: 'confirm', id, path, ids, titles })
+    })
+  }
+  ctx.effect(() => () => { for (const finish of [...waiting.values()]) finish(false) }, 'tessera: pending confirmations')
+
+  // Every edit in one agent turn shares a key, so the whole turn undoes as one step.
+  const turns = new Map<string, number>()
+  ctx.on('session/event', (session, event) => {
+    if (event.type === 'turn/start') turns.set(String(session.id), (turns.get(String(session.id)) ?? 0) + 1)
+  })
+  const turnKey = (run: ToolRun, path: string): string => {
+    const session = String(run.agent?.id ?? 'unknown')
+    return `agent:${session}:${turns.get(session) ?? 0}:${path}`
+  }
+
+  for (const spec of toolSpecs({ store, root, history, confirm, turnKey })) {
+    const { mutates: _mutates, execute: _execute, ...definition } = spec
+    const execute = guardReadOnly(spec, () => ctx.get('sandboxPolicy') as SandboxPolicyReader | undefined)
+    ctx.effect(() => ctx.tools.register(defineTool({ ...definition, execute } as never)), `tessera: ${definition.name}`)
+  }
+
+  ctx.inject(['skills'], (skillCtx) => {
+    skillCtx.effect(() => skillCtx.skills.register({
+      name: SKILL_NAME,
+      description: SKILL_DESCRIPTION,
+      content: SKILL_CONTENT,
+      source: 'runtime',
+    }), 'tessera: skill')
+  })
+
   const token = randomBytes(32).toString('hex')
   const routes = boardRoutes(store, hub)
   let web: WebFetcher | undefined
@@ -70,6 +130,25 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     webCtx.effect(() => () => { web = undefined }, 'tessera: web access')
   })
   for (const [key, handler] of workspaceRoutes(store, root, () => web)) routes.set(key, handler)
+  routes.set('POST /confirm', async ({ json }) => {
+    const body = await json()
+    const finish = typeof body.id === 'string' ? waiting.get(body.id) : undefined
+    if (finish === undefined) throw new TesseraError('stale', 'That question has already been answered.', 410)
+    finish(body.approved === true)
+    return { ok: true }
+  })
+  routes.set('GET /history', async ({ url }) => ({ snapshots: await history.list(normalizeBoardPath(url.searchParams.get('path'))) }))
+  routes.set('GET /history/read', async ({ url }) => history.read(normalizeBoardPath(url.searchParams.get('path')), String(url.searchParams.get('id'))))
+  routes.set('POST /history/snapshot', async ({ json }) => {
+    const body = await json()
+    if (typeof body.name !== 'string' || body.name.trim() === '') throw new TesseraError('bad-name', 'A name is required.')
+    return history.snapshot(normalizeBoardPath(body.path), body.name.trim())
+  })
+  routes.set('POST /history/restore', async ({ json }) => {
+    const body = await json()
+    await history.restore(normalizeBoardPath(body.path), String(body.id))
+    return { ok: true }
+  })
   const handle = createApiHandler({
     store, token, routes,
     config: { maxAssetBytes: config.maxAssetBytes, maxJsonBytes: config.maxJsonBytes },
