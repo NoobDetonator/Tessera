@@ -42,3 +42,10 @@ These findings held up: the `main` and `sidebar.panellist` slots, `shell.overlay
 **Q7. Obsidian paths.** JSON Canvas `file` paths are relative to the vault root. Tessera writes them relative to the board folder, so nested boards and images resolve only when you open `tessera/` itself as the vault. If you would rather open a parent folder as the vault, tell me and I will make the path prefix configurable.
 
 **Q8. To-do due dates.** Due dates live in the item text (`- [ ] Buy milk 📅 2026-11-10`, the Obsidian Tasks convention) instead of in `tessera` metadata, so they survive Obsidian stripping unknown fields.
+
+**Q9. Link preview images load directly in the browser.** You asked for link previews to go through `ctx.web.fetch`. That service only returns text: it rejects binary content (`WEB_UNSUPPORTED_CONTENT_TYPE`). So the page and its Open Graph text go through `ctx.web.fetch`, but the preview image is a plain `<img>` with `referrerpolicy="no-referrer"`, loaded by your browser from the remote site. It loads only on a card that already has a fetched preview, and a failed image just hides itself.
+- The alternative is to download the image once on the Host into `_assets/`, which would also make boards work offline afterwards, but it needs a network call outside `ctx.web.fetch`. Tell me if you prefer that.
+
+**Q10. Link previews refuse local addresses.** The Harness fetch provider will fetch loopback, private-network and cloud metadata addresses. An agent can create Link cards, so Tessera checks the URL first and refuses those destinations, including hostnames that resolve to them. A DNS change between that check and the fetch could still get past it, because the provider resolves the name again and offers no way to pin the address.
+
+**Q11. "Open with system app" refuses executable types.** `.exe`, `.bat`, `.ps1`, `.sh`, `.lnk`, `.html`, `.svg` and similar are refused, because a board can be edited by the agent and a click should not run code. If you want to allow some types, tell me which.

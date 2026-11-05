@@ -4,9 +4,10 @@ import { check, launch, sleep, summarize, until } from './lib.mjs'
 const app = await launch({ name: 'phase-1', port: 3191 })
 const { page } = app
 try {
-  page.on('dialog', d => d.accept('Smoke Board'))
   await app.shot('01-empty')
   await page.getByRole('button', { name: 'Create a board' }).click()
+  await page.locator('.t-dialog input').fill('Smoke Board')
+  await page.keyboard.press('Enter')
   const canvas = page.getByTestId('tessera-canvas')
   await canvas.waitFor()
   check('board created and opened', await page.locator('.t-crumb').last().textContent() === 'Smoke Board')
@@ -42,6 +43,15 @@ try {
   await until(async () => (await page.locator('.t-kind-note').count()) === 20, { label: 'notes after reload', timeout: 15000 })
   check('20 notes survive a reload', true)
   check('note text intact after reload', (await page.locator('.t-kind-note').filter({ hasText: 'Note 7' }).count()) === 1)
+
+  // Double-click on a card edits it. It must not create a new card behind it.
+  const editTarget = page.locator('.t-kind-note').filter({ hasText: 'Note 3' })
+  await editTarget.dblclick()
+  await page.locator('.t-editor').waitFor({ timeout: 3000 })
+  check('double-click on a card enters edit mode', (await page.locator('.t-editor').inputValue()).includes('Note 3'))
+  check('double-click on a card adds no card', (await page.locator('[data-card-id]').count()) === 20)
+  await page.keyboard.press('Escape')
+  await page.locator('.t-editor').waitFor({ state: 'detached', timeout: 3000 })
 
   // Selection and drag with undo as one step.
   const first = page.locator('.t-card').first()

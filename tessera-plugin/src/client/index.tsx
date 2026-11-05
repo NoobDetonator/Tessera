@@ -3,6 +3,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { App, type T } from './App.tsx'
 import { en, pt, zh } from './i18n.ts'
 import { TesseraStore } from './store.ts'
+import './cardviews.tsx'
 import css from './styles.css'
 
 const PANEL_ID = 'tessera'

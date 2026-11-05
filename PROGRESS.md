@@ -2,7 +2,7 @@
 
 **Pinned Harness version:** `@deepseek-ai/dsh@0.2.2-rc.1` (tag `dsh-v0.2.2-rc.1`, the npm `latest` when work started).
 
-**Status:** Phase 1 done. Working on Phase 2.
+**Status:** Phases 1 and 2 done. Working on Phase 3.
 
 Open items and assumptions are in [QUESTIONS.md](QUESTIONS.md). The design is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -10,9 +10,9 @@ Open items and assumptions are in [QUESTIONS.md](QUESTIONS.md). The design is in
 
 | Phase | Status | Evidence |
 |---|---|---|
-| 1. Foundations | Done, tag `phase-1` | 48 unit tests, 25 browser checks |
-| 2. Card types | Next | |
-| 3. Structure | Not started | |
+| 1. Foundations | Done, tag `phase-1` | Browser checks in `e2e/phase-1.mjs` |
+| 2. Card types | Done, tag `phase-2` | Browser checks in `e2e/phase-2.mjs` |
+| 3. Structure | Next | |
 | 4. Agent tools, skill, Ask the agent | Not started | |
 | 5. Power features | Not started | |
 | 6. Extras | Not started | |
@@ -42,6 +42,22 @@ Open items and assumptions are in [QUESTIONS.md](QUESTIONS.md). The design is in
 
 **Note on git history:** commit `b31bd9f` says it fixed a flaky store test, but its teardown race was still there. Commit `80cb0c2` is the real fix. The flakiness was in the tests, not in the store.
 
+## Phase 2
+
+**Built:** Image (aspect-locked resize, lightbox, caption), Link (Open Graph preview, inline YouTube and Vimeo), File (PDF, audio, video, generic with "open with system app"), To-do (due dates, drag and keyboard reorder, progress), Color (HEX, RGB, HSL, click to copy, picker), Document (title and excerpt, full-width editor with live preview), the left toolbar (click, drag or keyboard to place), paste (image, URL, hex, text), OS file drop, and an in-panel dialog replacing browser prompts.
+
+**Tested in the browser:** placing cards all three ways, the checklist down to the saved text, every paste type, dropping each file type, content-hash asset names, images loading through the authenticated route, aspect-locked resize, lightbox and caption, the document editor, tables and code blocks in Notes, toggling a checkbox and undoing it, a real preview through `ctx.web.fetch`, and copying cards to another board with new ids.
+
+**Bugs the smoke tests caught, now fixed:**
+- Typing a space at the end of a checklist item was impossible, because each keystroke rewrote the field with trailing spaces removed.
+- Double-clicking a card created a new note behind it instead of editing it, because pointer capture sent the event to the canvas.
+- Resize handles and connection anchors were clipped on fixed-height cards, so they could not be reached.
+
+**Not verified:**
+- PDF rendering. Headless Chromium has no PDF viewer, so the test only confirms the embed element exists. Please try one in a real browser.
+- Actually playing a YouTube or Vimeo video. The test confirms the play button appears, but not the embedded player.
+- "Open with system app". The test run has no desktop to open it on, so only the refusal rules are in place, and the route has no test yet.
+
 ## Next step
 
-Phase 2: Image, Link, File, To-do, Color and Document cards, the left toolbar, paste and drop.
+Phase 3: Column, Frame, nested Board with breadcrumbs, edges, guides, minimap, and a measured 1,000-card performance test.

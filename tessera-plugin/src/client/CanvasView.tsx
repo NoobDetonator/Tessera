@@ -126,8 +126,10 @@ const CardFrame = memo(function CardFrame({ node, doc, rect, store, selected, so
         ...(color !== undefined ? { '--t-card-color': color } : {}),
       } as React.CSSProperties}
     >
-      <View node={node} doc={doc} store={store} editing={editing} selected={selected} t={t} shell={shell} />
-      {tags.length > 0 ? <div className="t-tags">{tags.map(tag => <span key={tag} className="t-tag">{tag}</span>)}</div> : null}
+      <div className="t-card-body">
+        <View node={node} doc={doc} store={store} editing={editing} selected={selected} t={t} shell={shell} />
+        {tags.length > 0 ? <div className="t-tags">{tags.map(tag => <span key={tag} className="t-tag">{tag}</span>)}</div> : null}
+      </div>
       {locked ? <span className="t-lock" aria-label={t('card.locked')} title={t('card.locked')}>🔒</span> : null}
       {soloSelected && !locked && !editing ? <Handles auto={autoHeight} /> : null}
       {soloSelected && !editing ? <Anchors /> : null}
@@ -201,9 +203,11 @@ export interface CanvasViewProps {
   placeKind?: { active: boolean; place: (world: { x: number; y: number }) => void } | undefined
   /** Rewrites a live-dragged set of rects, for column reordering previews. */
   afterMove?: (ids: readonly string[]) => void
+  /** Dropped OS files or dragged-in URLs. */
+  onDropData?: (data: DataTransfer, world: { x: number; y: number }) => void
 }
 
-export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards, onViewChange, dimmedIds, hiddenIds, placeKind, afterMove }: CanvasViewProps): ReactNode {
+export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards, onViewChange, dimmedIds, hiddenIds, placeKind, afterMove, onDropData }: CanvasViewProps): ReactNode {
   const doc = useTessera(store, state => state.doc)
   const path = useTessera(store, state => state.path)
   const selection = useTessera(store, state => state.selection)
@@ -252,6 +256,7 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
     const spacing = DOT_SPACING * z * (z < 0.5 ? 4 : z < 1 ? 2 : 1)
     root.style.backgroundSize = `${spacing}px ${spacing}px`
     root.style.backgroundPosition = `${x}px ${y}px`
+    world.style.setProperty('--t-inverse-zoom', String(1 / z))
     if (frame.current === undefined) {
       frame.current = requestAnimationFrame(() => {
         frame.current = undefined
@@ -461,7 +466,6 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
       }
       if (!selection.has(id) && !event.shiftKey) store.select(new Set([id]))
       if (editing !== undefined) store.setEditing(undefined)
-      root.setPointerCapture(event.pointerId)
       return
     }
     if (id === undefined) {
@@ -506,7 +510,11 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
         applyView()
         return
       case 'pending-drag':
-        if (Math.hypot(event.clientX - state.startX, event.clientY - state.startY) > 3) beginDrag(state)
+        if (Math.hypot(event.clientX - state.startX, event.clientY - state.startY) > 3) {
+          // Capturing here, not on pointerdown: capture retargets click and dblclick away from the card.
+          rootRef.current?.setPointerCapture(event.pointerId)
+          beginDrag(state)
+        }
         return
       case 'drag': {
         const world = toWorld(event.clientX, event.clientY)
@@ -697,8 +705,9 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
   const onEdgeLabel = useCallback((id: string) => {
     const edge = store.state.doc?.edges.find(item => item.id === id)
     if (edge === undefined) return
-    const label = window.prompt(t('edge.label'), edge.label ?? '')
-    if (label !== null) store.patchEdge(id, { label }, { label: 'Edge label' })
+    void store.ask({ title: t('edge.label'), value: edge.label ?? '' }).then((label) => {
+      if (label !== null) store.patchEdge(id, { label }, { label: 'Edge label' })
+    })
   }, [store, t])
 
   return (
@@ -715,6 +724,18 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
       onPointerCancel={onPointerUp}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContext}
+      onDragOver={(event) => {
+        // A checklist row reorder is a drag too; only outside content is a drop on the canvas.
+        if (onDropData !== undefined && (event.target as HTMLElement).closest('.t-todo') === null) {
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'copy'
+        }
+      }}
+      onDrop={(event) => {
+        if (onDropData === undefined || (event.target as HTMLElement).closest('.t-todo') !== null) return
+        event.preventDefault()
+        onDropData(event.dataTransfer, toWorld(event.clientX, event.clientY))
+      }}
     >
       <div ref={worldRef} className="t-world">
         <EdgeLayer edges={visibleEdges} rects={rectLookup} selected={selectedEdge} draft={edgeDraft} onSelect={onSelectEdge} onLabel={onEdgeLabel} />

@@ -171,7 +171,7 @@ const NoteView = memo(function NoteView({ node, doc, store, editing, shell }: Ca
   }
   return (
     <div className="t-note" onClick={onClick}>
-      {(node.text ?? '') === '' ? <span className="t-placeholder">&nbsp;</span> : <MarkdownText text={rendered} labels={MARKDOWN_LABELS} variant="compact" omitHtml />}
+      {(node.text ?? '') === '' ? <span className="t-placeholder">&nbsp;</span> : <MarkdownText text={rendered} labels={MARKDOWN_LABELS} omitHtml />}
     </div>
   )
 })

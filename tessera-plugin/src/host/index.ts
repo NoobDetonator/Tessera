@@ -9,6 +9,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import z from '@deepseek-ai/schemastery'
 import { API_PREFIX, BOOT_GLOBAL, type BootGlobals } from '../shared/protocol.ts'
 import { boardRoutes, createApiHandler, EventHub, isLoopbackBind } from './http.ts'
+import type { WebFetcher } from './linkpreview.ts'
 import { workspaceRoutes } from './workspace.ts'
 import { BoardStore } from './store.ts'
 
@@ -63,7 +64,12 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
   const token = randomBytes(32).toString('hex')
   const routes = boardRoutes(store, hub)
-  for (const [key, handler] of workspaceRoutes(store, root)) routes.set(key, handler)
+  let web: WebFetcher | undefined
+  ctx.inject(['web'], (webCtx) => {
+    web = webCtx.get('web') as unknown as WebFetcher
+    webCtx.effect(() => () => { web = undefined }, 'tessera: web access')
+  })
+  for (const [key, handler] of workspaceRoutes(store, root, () => web)) routes.set(key, handler)
   const handle = createApiHandler({
     store, token, routes,
     config: { maxAssetBytes: config.maxAssetBytes, maxJsonBytes: config.maxJsonBytes },

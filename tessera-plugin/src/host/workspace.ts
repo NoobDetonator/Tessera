@@ -1,11 +1,14 @@
 /** Board-level routes: the board list, creating, renaming, deleting, and user preferences. */
+import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { extname, join } from 'node:path'
 import type { CanvasDoc } from '../shared/canvas.ts'
 import { cardKind } from '../shared/classify.ts'
 import type { BoardInfo, BoardList } from '../shared/protocol.ts'
 import type { RouteHandler } from './http.ts'
-import { normalizeBoardPath, slugify, TesseraError, type BoardStore } from './store.ts'
+import { fetchPreview, type WebFetcher } from './linkpreview.ts'
+import { normalizeBoardPath, normalizeRelativePath, slugify, TesseraError, type BoardStore } from './store.ts'
 
 const PREFS_FILE = '_tessera.json'
 
@@ -40,8 +43,43 @@ export async function listBoards(store: BoardStore, root: string): Promise<Board
   return { boards, favorites: Array.isArray(prefs.favorites) ? prefs.favorites : [], root }
 }
 
-export function workspaceRoutes(store: BoardStore, root: string): Map<string, RouteHandler> {
+/** Extensions that would run code when handed to the system opener. */
+const EXECUTABLE = new Set(['.exe', '.com', '.bat', '.cmd', '.ps1', '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh', '.msi', '.msp', '.scr', '.lnk', '.pif', '.reg', '.hta', '.cpl', '.jar', '.sh', '.bash', '.zsh', '.command', '.app', '.appimage', '.desktop', '.deb', '.rpm', '.url', '.html', '.htm', '.svg'])
+
+/** Hand a file inside the board folder to the system's default app. Executable types are refused. */
+async function openWithSystem(store: BoardStore, relativePath: string): Promise<void> {
+  const path = normalizeRelativePath(relativePath)
+  if (EXECUTABLE.has(extname(path).toLowerCase())) throw new TesseraError('refused', 'This file type can run code, so Tessera will not open it.', 403)
+  const file = await store.resolveInside(path)
+  if (!existsSync(file)) throw new TesseraError('not-found', `No file at ${path}`, 404)
+  const [command, args] = process.platform === 'win32' ? ['explorer.exe', [file]] as const
+    : process.platform === 'darwin' ? ['open', [file]] as const
+      : ['xdg-open', [file]] as const
+  await new Promise<void>((done, fail) => {
+    const child = spawn(command, args, { detached: true, stdio: 'ignore' })
+    child.once('spawn', () => { child.unref(); done() })
+    child.once('error', fail)
+  })
+}
+
+export function workspaceRoutes(store: BoardStore, root: string, web: () => WebFetcher | undefined): Map<string, RouteHandler> {
   const routes = new Map<string, RouteHandler>()
+  routes.set('GET /link-preview', async ({ url }) => {
+    const service = web()
+    if (service === undefined) throw new TesseraError('unavailable', 'Web access is not available in this setup.', 503)
+    const target = url.searchParams.get('url')
+    if (target === null) throw new TesseraError('bad-url', 'A url is required.')
+    try {
+      return await fetchPreview(service, target)
+    } catch (error) {
+      if (error instanceof TesseraError) throw error
+      throw new TesseraError('preview-failed', (error as Error).message, 502)
+    }
+  })
+  routes.set('POST /open', async ({ json }) => {
+    await openWithSystem(store, String((await json()).path ?? ''))
+    return { ok: true }
+  })
   routes.set('GET /boards', () => listBoards(store, root))
   routes.set('POST /board/create', async ({ json }) => {
     const body = await json()

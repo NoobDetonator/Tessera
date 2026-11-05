@@ -1,10 +1,13 @@
 /** The Tessera panel: board sidebar, top bar, canvas and app-level shortcuts. */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { newId, type CanvasEdge, type CanvasNode } from '../shared/canvas.ts'
+import { newId, type CanvasEdge, type CanvasNode, type CardKind } from '../shared/canvas.ts'
+import { isSingleUrl, normalizeHex } from '../shared/cardtext.ts'
 import type { Change } from '../shared/change.ts'
 import type { BoardInfo } from '../shared/protocol.ts'
 import { CanvasView, type CanvasApi } from './CanvasView.tsx'
 import type { CardShell } from './cards.tsx'
+import { addFiles, addLink, makeColor, makeDocument, makeNote, makeTodo, type Point } from './create.ts'
+import { Dialog, DocumentEditor, Lightbox, Toolbar } from './overlays.tsx'
 import { useTessera, type TesseraStore } from './store.ts'
 
 export type T = (key: string) => string
@@ -64,6 +67,15 @@ function Menu({ x, y, entries, onClose }: { x: number; y: number; entries: reado
   )
 }
 
+/** Ask for a title and create the board. */
+async function askNewBoard(store: TesseraStore, t: T): Promise<void> {
+  const title = await store.ask({ title: t('sidebar.new'), placeholder: t('prompt.boardTitle') })
+  if (title !== null && title.trim() !== '') await store.createBoard(title.trim())
+}
+
+/** Kinds on the left toolbar. */
+const TOOL_KINDS: readonly CardKind[] = ['note', 'document', 'todo', 'link', 'image', 'file', 'color']
+
 function Sidebar({ store, t }: { store: TesseraStore; t: T }): ReactNode {
   const boards = useTessera(store, state => state.boards)
   const favorites = useTessera(store, state => state.favorites)
@@ -119,10 +131,7 @@ function Sidebar({ store, t }: { store: TesseraStore; t: T }): ReactNode {
     </div>
   )
 
-  const create = (): void => {
-    const title = window.prompt(t('prompt.boardTitle'), '')
-    if (title !== null && title.trim() !== '') void store.createBoard(title.trim())
-  }
+  const create = (): void => { void askNewBoard(store, t) }
 
   return (
     <nav className="t-sidebar" aria-label={t('sidebar.boards')}>
@@ -151,14 +160,19 @@ function Sidebar({ store, t }: { store: TesseraStore; t: T }): ReactNode {
             {
               label: t('menu.rename'),
               onSelect: () => {
-                const title = window.prompt(t('prompt.boardTitle'), menu.board.title)
-                if (title !== null && title.trim() !== '') void store.renameBoard(menu.board.path, title.trim())
+                void store.ask({ title: t('menu.rename'), value: menu.board.title }).then((title) => {
+                  if (title !== null && title.trim() !== '') void store.renameBoard(menu.board.path, title.trim())
+                })
               },
             },
             {
               label: t('menu.deleteBoard'),
               danger: true,
-              onSelect: () => { if (window.confirm(t('confirm.deleteBoard'))) void store.deleteBoard(menu.board.path) },
+              onSelect: () => {
+                void store.ask({ title: t('menu.deleteBoard'), message: t('confirm.deleteBoard'), input: false, danger: true, confirmLabel: t('menu.delete') }).then((answer) => {
+                  if (answer !== null) void store.deleteBoard(menu.board.path)
+                })
+              },
             },
           ]}
         />
@@ -194,10 +208,16 @@ export function App({ store, t }: { store: TesseraStore; t: T }): ReactNode {
   const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[] } | undefined>(undefined)
   const pointer = useRef({ x: 0, y: 0 })
   const memoryClip = useRef<ClipboardCards | undefined>(undefined)
+  const dialog = useTessera(store, state => state.dialog)
+  const [armed, setArmed] = useState<CardKind | undefined>(undefined)
+  const [lightbox, setLightbox] = useState<string | undefined>(undefined)
+  const [documentId, setDocumentId] = useState<string | undefined>(undefined)
+  const filePicker = useRef<HTMLInputElement>(null)
+  const pickAt = useRef<Point>({ x: 0, y: 0 })
 
   const shell = useMemo<CardShell>(() => ({
-    openDocument: () => {},
-    openLightbox: () => {},
+    openDocument: (id) => { setDocumentId(id) },
+    openLightbox: (id) => { setLightbox(id) },
     enterBoard: (target) => { void store.open(target, [...store.state.breadcrumbs, target]) },
     jumpToCard: (id) => {
       const node = store.node(id)
@@ -207,6 +227,48 @@ export function App({ store, t }: { store: TesseraStore; t: T }): ReactNode {
       }
     },
   }), [store])
+
+  /** Create a card of a toolbar kind at a board position. */
+  const place = useCallback((kind: CardKind, at: Point) => {
+    const add = (node: CanvasNode, edit: boolean): void => {
+      store.commit({ nodes: { [node.id]: node } }, { label: t(`card.${kind}`), coalesce: `new:${node.id}` })
+      store.select(new Set([node.id]))
+      if (edit) store.setEditing(node.id)
+    }
+    switch (kind) {
+      case 'note': add(makeNote(at), true); return
+      case 'document': { const node = makeDocument(at); add(node, false); setDocumentId(node.id); return }
+      case 'todo': add(makeTodo(at), false); return
+      case 'color': add(makeColor(at), false); return
+      case 'link':
+        void store.ask({ title: t('card.link'), inputType: 'url', placeholder: 'https://' }).then((url) => {
+          if (url === null || url.trim() === '') return
+          if (isSingleUrl(url)) addLink(store, url.trim(), at)
+          else store.notify(t('link.invalid'))
+        })
+        return
+      case 'image':
+      case 'file':
+        pickAt.current = at
+        if (filePicker.current !== null) {
+          filePicker.current.accept = kind === 'image' ? 'image/*' : ''
+          filePicker.current.click()
+        }
+        return
+      default:
+    }
+  }, [store, t])
+
+  const onDropData = useCallback((data: DataTransfer, world: Point) => {
+    const files = Array.from(data.files)
+    if (files.length > 0) { void addFiles(store, files, world); return }
+    const url = data.getData('text/uri-list').split('\n').find(line => line !== '' && !line.startsWith('#')) ?? data.getData('text/plain')
+    if (isSingleUrl(url)) addLink(store, url.trim(), world)
+    else if (url.trim() !== '') {
+      const note = makeNote(world, url)
+      store.commit({ nodes: { [note.id]: note } }, { label: t('card.note') })
+    }
+  }, [store, t])
 
   const selectedCards = useCallback((): CanvasNode[] => {
     const { doc: current, selection } = store.state
@@ -325,14 +387,20 @@ export function App({ store, t }: { store: TesseraStore; t: T }): ReactNode {
         pasteCards(JSON.parse(raw) as ClipboardCards, canvas.current?.toWorld(pointer.current.x, pointer.current.y))
         return
       }
-      const text = event.clipboardData?.getData('text/plain') ?? ''
-      if (text.trim() !== '') {
+      const at = canvas.current?.toWorld(pointer.current.x, pointer.current.y) ?? { x: 0, y: 0 }
+      const files = Array.from(event.clipboardData?.files ?? [])
+      if (files.length > 0) {
         event.preventDefault()
-        const at = canvas.current?.toWorld(pointer.current.x, pointer.current.y) ?? { x: 0, y: 0 }
-        const id = newId()
-        store.commit({ nodes: { [id]: { id, type: 'text', text, x: Math.round(at.x), y: Math.round(at.y), width: 248, height: 64, tessera: { kind: 'note' } } } }, { label: 'Paste' })
-        store.select(new Set([id]))
+        void addFiles(store, files, at)
+        return
       }
+      const text = event.clipboardData?.getData('text/plain') ?? ''
+      if (text.trim() === '') return
+      event.preventDefault()
+      if (isSingleUrl(text)) { addLink(store, text.trim(), at); return }
+      const node = normalizeHex(text) !== undefined ? makeColor(at, text.trim()) : makeNote(at, text)
+      store.commit({ nodes: { [node.id]: node } }, { label: 'Paste' })
+      store.select(new Set([node.id]))
     }
     const onMove = (event: PointerEvent): void => { pointer.current = { x: event.clientX, y: event.clientY } }
     window.addEventListener('keydown', onKey)
@@ -402,10 +470,7 @@ export function App({ store, t }: { store: TesseraStore; t: T }): ReactNode {
             <button
               type="button"
               className="t-btn t-btn-primary"
-              onClick={() => {
-                const title = window.prompt(t('prompt.boardTitle'), '')
-                if (title !== null && title.trim() !== '') void store.createBoard(title.trim())
-              }}
+              onClick={() => { void askNewBoard(store, t) }}
             >{t('empty.create')}</button>
           </div>
         ) : (
@@ -436,14 +501,50 @@ export function App({ store, t }: { store: TesseraStore; t: T }): ReactNode {
             {loadError !== undefined ? (
               <div className="t-empty"><h2>{t('load.failed')}</h2><p>{loadError}</p></div>
             ) : doc !== undefined ? (
-              <CanvasView store={store} t={t} shell={shell} apiRef={canvas} onContextMenu={openMenu} />
+              <div className="t-stage">
+                <CanvasView
+                  store={store}
+                  t={t}
+                  shell={shell}
+                  apiRef={canvas}
+                  onContextMenu={openMenu}
+                  onDropData={onDropData}
+                  placeKind={{ active: armed !== undefined, place: (world) => { if (armed !== undefined) { setArmed(undefined); place(armed, world) } } }}
+                />
+                <Toolbar
+                  kinds={TOOL_KINDS}
+                  armed={armed}
+                  t={t}
+                  onArm={setArmed}
+                  onDrop={(kind, x, y) => {
+                    const element = document.elementFromPoint(x, y)
+                    if (element?.closest('[data-testid="tessera-canvas"]') != null && canvas.current !== null) place(kind, canvas.current.toWorld(x, y))
+                  }}
+                  onKeyboard={(kind) => { if (canvas.current !== null) place(kind, canvas.current.screenCenter()) }}
+                />
+              </div>
             ) : <div className="t-empty" aria-busy="true" />}
           </>
         )}
+        {documentId !== undefined ? <DocumentEditor key={documentId} store={store} id={documentId} t={t} onClose={() => { setDocumentId(undefined) }} /> : null}
         {warning !== undefined ? <div className="t-banner t-banner-warning" role="alert">{warning}</div> : null}
         {notice !== undefined ? <div className="t-banner" role="status">{notice}</div> : null}
       </main>
       {menu !== undefined ? <Menu x={menu.x} y={menu.y} entries={menu.entries} onClose={closeMenu} /> : null}
+      {lightbox !== undefined ? <Lightbox store={store} id={lightbox} t={t} onClose={() => { setLightbox(undefined) }} /> : null}
+      {dialog !== undefined ? <Dialog request={dialog} t={t} onClose={(value) => { store.answerDialog(value) }} /> : null}
+      <input
+        ref={filePicker}
+        type="file"
+        multiple
+        hidden
+        data-testid="tessera-file-input"
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? [])
+          event.target.value = ''
+          if (files.length > 0) void addFiles(store, files, pickAt.current)
+        }}
+      />
     </div>
   )
 }

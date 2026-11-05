@@ -16,6 +16,18 @@ export interface ConfirmRequest {
   titles: string[]
 }
 
+export interface DialogRequest {
+  title: string
+  message?: string
+  value?: string
+  placeholder?: string
+  /** False shows a confirmation with no text field. */
+  input?: boolean
+  inputType?: 'text' | 'url'
+  confirmLabel?: string
+  danger?: boolean
+}
+
 export interface TesseraState {
   available: boolean
   connected: boolean
@@ -40,6 +52,7 @@ export interface TesseraState {
   confirms: readonly ConfirmRequest[]
   filterTags: readonly string[]
   focusMode: boolean
+  dialog: DialogRequest | undefined
 }
 
 const EMPTY: ReadonlySet<string> = new Set()
@@ -65,6 +78,7 @@ const initial = (): TesseraState => ({
   confirms: [],
   filterTags: [],
   focusMode: false,
+  dialog: undefined,
 })
 
 interface PendingApply {
@@ -110,6 +124,7 @@ export class TesseraStore {
   private measures = new Map<string, number>()
   private measureFrame: number | undefined
   private disposed = false
+  private dialogDone: ((value: string | null) => void) | undefined
   /** Set by the shell when a Tessera event should pull the panel forward. */
   private wasConnected = false
 
@@ -373,6 +388,21 @@ export class TesseraStore {
     this.set({ notice })
     if (this.noticeTimer !== undefined) clearTimeout(this.noticeTimer)
     this.noticeTimer = setTimeout(() => { this.set({ notice: undefined }) }, 4000)
+  }
+
+  /** Ask the user something in the panel's dialog. Resolves with the value, or null when dismissed. */
+  ask(request: DialogRequest): Promise<string | null> {
+    this.dialogDone?.(null)
+    this.set({ dialog: request })
+    return new Promise((done) => { this.dialogDone = done })
+  }
+
+  /** Called by the dialog when it closes. */
+  answerDialog(value: string | null): void {
+    const done = this.dialogDone
+    this.dialogDone = undefined
+    this.set({ dialog: undefined })
+    done?.(value)
   }
 
   /** Create a board and open it. */
