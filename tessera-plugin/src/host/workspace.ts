@@ -6,6 +6,10 @@ import { extname, join } from 'node:path'
 import type { CanvasDoc } from '../shared/canvas.ts'
 import { cardKind } from '../shared/classify.ts'
 import type { BoardInfo, BoardList } from '../shared/protocol.ts'
+import { searchBoard, type SearchHit } from '../shared/search.ts'
+import { BUILTIN_TEMPLATES, buildTemplate, instantiate } from '../shared/templates.ts'
+import { parseCanvas, serializeCanvas } from '../shared/canvas.ts'
+import { mkdir, readdir } from 'node:fs/promises'
 import type { RouteHandler } from './http.ts'
 import { fetchPreview, type WebFetcher } from './linkpreview.ts'
 import { normalizeBoardPath, normalizeRelativePath, slugify, TesseraError, type BoardStore } from './store.ts'
@@ -43,6 +47,25 @@ export async function listBoards(store: BoardStore, root: string): Promise<Board
   return { boards, favorites: Array.isArray(prefs.favorites) ? prefs.favorites : [], root }
 }
 
+const TEMPLATE_DIR = '_templates'
+
+/** The starting document for a template id. Saved templates get new ids each time. */
+async function templateDoc(root: string, id: string): Promise<CanvasDoc> {
+  if (!id.startsWith('saved:')) {
+    const built = buildTemplate(id)
+    if (built === undefined) throw new TesseraError('bad-template', `Unknown template: ${id}`)
+    return built
+  }
+  const file = id.slice('saved:'.length)
+  if (file !== slugify(file)) throw new TesseraError('bad-template', 'Unknown template.')
+  try {
+    return instantiate(parseCanvas(await readFile(join(root, TEMPLATE_DIR, file), 'utf8')))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new TesseraError('bad-template', 'That template no longer exists.', 404)
+    throw error
+  }
+}
+
 /** Extensions that would run code when handed to the system opener. */
 const EXECUTABLE = new Set(['.exe', '.com', '.bat', '.cmd', '.ps1', '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh', '.msi', '.msp', '.scr', '.lnk', '.pif', '.reg', '.hta', '.cpl', '.jar', '.sh', '.bash', '.zsh', '.command', '.app', '.appimage', '.desktop', '.deb', '.rpm', '.url', '.html', '.htm', '.svg'])
 
@@ -64,6 +87,31 @@ async function openWithSystem(store: BoardStore, relativePath: string): Promise<
 
 export function workspaceRoutes(store: BoardStore, root: string, web: () => WebFetcher | undefined): Map<string, RouteHandler> {
   const routes = new Map<string, RouteHandler>()
+  routes.set('GET /search', async ({ url }) => {
+    const query = url.searchParams.get('q') ?? ''
+    const matches: SearchHit[] = []
+    for (const path of await store.listPaths()) {
+      const doc = await store.peek(path)
+      if (doc !== undefined) matches.push(...searchBoard(path, doc, query))
+    }
+    return { matches: matches.slice(0, 50), truncated: matches.length > 50 }
+  })
+  routes.set('GET /templates', async () => ({
+    builtin: BUILTIN_TEMPLATES,
+    saved: (await readdir(join(root, TEMPLATE_DIR)).catch(() => [] as string[]))
+      .filter(file => file.toLowerCase().endsWith('.canvas'))
+      .map(file => ({ id: `saved:${file}`, title: titleOf(file) })),
+  }))
+  routes.set('POST /templates/save', async ({ json }) => {
+    const body = await json()
+    const path = normalizeBoardPath(body.path)
+    if (typeof body.name !== 'string' || body.name.trim() === '') throw new TesseraError('bad-name', 'A name is required.')
+    await store.flush(path)
+    const { doc } = await store.read(path)
+    await mkdir(join(root, TEMPLATE_DIR), { recursive: true })
+    await writeFile(join(root, TEMPLATE_DIR, `${slugify(body.name)}.canvas`), serializeCanvas(doc), 'utf8')
+    return { ok: true }
+  })
   routes.set('GET /link-preview', async ({ url }) => {
     const service = web()
     if (service === undefined) throw new TesseraError('unavailable', 'Web access is not available in this setup.', 503)
@@ -84,8 +132,9 @@ export function workspaceRoutes(store: BoardStore, root: string, web: () => WebF
   routes.set('POST /board/create', async ({ json }) => {
     const body = await json()
     const title = typeof body.title === 'string' && body.title.trim() !== '' ? body.title : 'Untitled'
+    const doc = typeof body.template === 'string' && body.template !== '' ? await templateDoc(root, body.template) : { nodes: [], edges: [] }
     const path = await store.freePath(title)
-    await store.create(path, { nodes: [], edges: [] })
+    await store.create(path, doc)
     return { path, title: titleOf(path) }
   })
   routes.set('POST /board/rename', async ({ json }) => {

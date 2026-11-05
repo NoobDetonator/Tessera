@@ -396,7 +396,7 @@ const ColumnView = memo(function ColumnView({ node, store, editing, t }: CardVie
   )
 })
 
-function MiniBoard({ doc }: { doc: CanvasDoc }): ReactNode {
+export function MiniBoard({ doc }: { doc: CanvasDoc }): ReactNode {
   const rects = useMemo(() => doc.nodes.slice(0, 300).map(node => ({ id: node.id, group: node.type === 'group', color: node.color, ...visualRect(node) })), [doc])
   const box = boundsOf(rects)
   if (box === undefined) return <div className="t-board-empty" />

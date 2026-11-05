@@ -220,7 +220,7 @@ try {
   })
   check('copy writes Tessera cards to the clipboard', (await page.evaluate(() => window.__tesseraClip.length)) > 100)
   await page.locator('.t-sidebar-head button').click()
-  await page.locator('.t-dialog input').fill('Other')
+  await page.locator('.t-dialog input').first().fill('Other')
   await page.keyboard.press('Enter')
   await until(async () => (await page.locator('.t-crumb').last().textContent()) === 'Other', { label: 'second board' })
   await page.evaluate(() => {

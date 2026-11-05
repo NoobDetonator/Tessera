@@ -6,8 +6,9 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { boundsOf, intersects, newId, type CanvasEdge, type CanvasNode, type CardKind, type EdgeSide, type Rect } from '../shared/canvas.ts'
 import { cardKind, groupDescendants } from '../shared/classify.ts'
 import { routeEdge, sideCenter, snapMove, snapToGrid, type Guide } from '../shared/geometry.ts'
+import { backlinkIndex } from '../shared/backlinks.ts'
 import { COLUMN_COLLAPSED_HEIGHT, kindsOf, visualRect } from '../shared/structure.ts'
-import { cardTypeOf, type CardShell } from './cards.tsx'
+import { cardTitle, cardTypeOf, type CardShell } from './cards.tsx'
 import type { TesseraStore } from './store.ts'
 import { useTessera } from './store.ts'
 
@@ -77,13 +78,15 @@ interface CardFrameProps {
   dimmed: boolean
   dragging: boolean
   dropTarget: boolean
+  /** Cards that link here. */
+  backlinks: readonly string[] | undefined
   /** Far zoomed out: draw a plain box. */
   lod: boolean
   t: (key: string) => string
   shell: CardShell
 }
 
-const CardFrame = memo(function CardFrame({ node, kind, rect, store, selected, soloSelected, editing, dimmed, dragging, dropTarget, lod, t, shell }: CardFrameProps) {
+const CardFrame = memo(function CardFrame({ node, kind, rect, store, selected, soloSelected, editing, dimmed, dragging, dropTarget, backlinks, lod, t, shell }: CardFrameProps) {
   const type = cardTypeOf(kind)
   const bodyRef = useRef<HTMLDivElement>(null)
   const locked = node.tessera?.locked === true
@@ -144,12 +147,30 @@ const CardFrame = memo(function CardFrame({ node, kind, rect, store, selected, s
           {tags.length > 0 ? <div className="t-tags">{tags.map(tag => <span key={tag} className="t-tag">{tag}</span>)}</div> : null}
         </div>
       )}
+      {backlinks !== undefined && !plain ? <BacklinkBadge sources={backlinks} store={store} shell={shell} t={t} /> : null}
       {locked && !plain ? <span className="t-lock" aria-label={t('card.locked')} title={t('card.locked')}>🔒</span> : null}
       {showHandles ? <Handles auto={widthOnly} /> : null}
       {soloSelected && !editing ? <Anchors /> : null}
     </div>
   )
 })
+
+function BacklinkBadge({ sources, store, shell, t }: { sources: readonly string[]; store: TesseraStore; shell: CardShell; t: (key: string) => string }): ReactNode {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="t-backlinks" data-interactive="" data-testid="backlinks">
+      <button type="button" className="t-chip" aria-expanded={open} title={t('backlinks.title')} onClick={() => { setOpen(!open) }}>↩ {sources.length}</button>
+      {open ? (
+        <div className="t-popover t-backlinks-list" role="group" aria-label={t('backlinks.title')}>
+          {sources.map((id) => {
+            const source = store.node(id)
+            return <button key={id} type="button" className="t-menu-item" onClick={() => { setOpen(false); shell.jumpToCard(id) }}><span>{source === undefined ? id : cardTitle(source) || id}</span></button>
+          })}
+        </div>
+      ) : null}
+    </div>
+  )
+}
 
 function Handles({ auto }: { auto: boolean }): ReactNode {
   const handles: Handle[] = auto ? ['w', 'e'] : ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
@@ -250,6 +271,7 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
   const [lod, setLod] = useState(false)
   const [dropId, setDropId] = useState<string | undefined>(undefined)
   const kinds = useMemo(() => (doc === undefined ? new Map<string, CardKind>() : kindsOf(doc)), [doc])
+  const links = useMemo(() => (doc === undefined ? new Map<string, string[]>() : backlinkIndex(doc)), [doc])
 
   const syncVisible = useCallback(() => {
     const root = rootRef.current
@@ -772,6 +794,7 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
               kind={kinds.get(node.id) ?? 'note'}
               rect={live ?? node}
               dropTarget={dropId === node.id}
+              backlinks={links.get(node.id)}
               lod={lod}
               store={store}
               selected={selection.has(node.id)}

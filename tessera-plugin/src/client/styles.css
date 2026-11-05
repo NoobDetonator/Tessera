@@ -415,3 +415,50 @@
   box-shadow: var(--dsw-elevation-panel, 0 4px 16px rgb(0 0 0 / 16%));
   cursor: pointer; touch-action: none;
 }
+
+.t-picker-mask { align-items: flex-start; padding-top: 12vh; }
+.t-picker { display: flex; flex-direction: column; width: min(560px, calc(100vw - 32px)); max-height: 60vh; border-radius: 12px; overflow: hidden; background: var(--dsw-alias-bg-layer-1); box-shadow: var(--dsw-elevation-prominent, 0 8px 32px rgb(0 0 0 / 24%)); color: var(--dsw-alias-label-primary); font-size: 13px; line-height: 20px; }
+.t-picker > input { flex: none; height: 44px; padding: 0 16px; border: 0; border-bottom: 0.5px solid var(--dsw-alias-border-l2); outline: none; background: transparent; color: inherit; font: inherit; font-size: 15px; }
+.t-picker-list { overflow: auto; padding: 4px; }
+.t-picker-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; padding: 4px 12px; border-radius: 6px; cursor: pointer; }
+.t-picker-row[aria-selected="true"] { background: var(--dsw-alias-interactive-bg-hover); }
+.t-picker-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t-picker-empty { padding: 12px; color: var(--dsw-alias-label-tertiary); text-align: center; }
+.t-hit { flex: 1; min-width: 0; }
+.t-hit-head { display: flex; justify-content: space-between; gap: 12px; }
+.t-hit-board { flex: none; color: var(--dsw-alias-label-tertiary); font-size: 11px; }
+.t-hit-snippet { color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.t-field { display: flex; flex-direction: column; gap: 4px; color: var(--dsw-alias-label-secondary); }
+.t-field select { height: 32px; padding: 0 8px; border: 0.5px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font: inherit; }
+
+.t-popover-anchor { position: relative; }
+.t-popover { position: absolute; z-index: 60; min-width: 180px; max-height: 320px; overflow: auto; padding: 4px; border-radius: var(--t-radius); background: var(--dsw-alias-bg-layer-1); box-shadow: var(--dsw-elevation-panel, 0 4px 16px rgb(0 0 0 / 16%)); }
+.t-popover-anchor .t-popover { right: 0; top: calc(100% + 4px); }
+.t-popover-row { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 8px; border-radius: 6px; cursor: pointer; }
+.t-popover-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.t-popover-row .t-picker-title { flex: 1; }
+.t-popover .t-chip { margin: 4px 8px; }
+
+/* A side panel takes its width from the canvas, so it never hides cards. */
+.t-stage-canvas { position: relative; flex: 1; min-width: 0; display: flex; }
+.t-side { flex: none; display: flex; flex-direction: column; gap: 8px; width: 300px; padding: 12px; border-left: 0.5px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-1); }
+.t-side > header { display: flex; align-items: center; justify-content: space-between; }
+.t-side h2 { margin: 0; font-size: 15px; line-height: 22px; font-weight: 600; }
+.t-side-preview { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 6px; border-radius: var(--t-radius); background: var(--dsw-alias-bg-base); box-shadow: inset 0 0 0 0.5px var(--dsw-alias-border-l2); }
+.t-side-preview .t-board-mini { height: 160px; }
+.t-side-actions { display: flex; align-items: center; justify-content: space-between; }
+.t-side-list { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.t-side-row { display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.t-side-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.t-side-row[aria-selected="true"] { background: var(--dsw-alias-interactive-bg-active); }
+
+.t-editing .t-card-body { overflow: visible !important; }
+.t-suggest { position: absolute; left: 8px; top: 100%; z-index: 50; display: flex; flex-direction: column; min-width: 180px; max-width: 320px; padding: 4px; margin-top: 4px; border-radius: var(--t-radius); background: var(--dsw-alias-bg-layer-1); box-shadow: var(--dsw-elevation-panel, 0 4px 16px rgb(0 0 0 / 16%)); }
+.t-suggest button { padding: 0 8px; min-height: 26px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.t-suggest button[aria-selected="true"], .t-suggest button:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.t-note { position: relative; }
+
+.t-backlinks { position: absolute; right: 6px; bottom: -11px; z-index: 2; }
+.t-backlinks-list { right: 0; top: calc(100% + 4px); }
+.t-backlinks .t-chip { box-shadow: 0 0 0 0.5px var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-1); }

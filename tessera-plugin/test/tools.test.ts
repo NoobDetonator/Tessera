@@ -8,8 +8,8 @@ import { cardKind } from '../src/shared/classify.ts'
 import { layoutChange } from '../src/shared/layout.ts'
 import { applyChange } from '../src/shared/change.ts'
 import { searchBoard } from '../src/shared/search.ts'
-import { BUILTIN_TEMPLATES, buildTemplate } from '../src/shared/templates.ts'
-import { HistoryStore } from '../src/host/history.ts'
+import { BUILTIN_TEMPLATES, buildTemplate, instantiate } from '../src/shared/templates.ts'
+import { AutoSnapshots, HistoryStore } from '../src/host/history.ts'
 import { BoardStore } from '../src/host/store.ts'
 import { guardReadOnly, toolSpecs, type SandboxPolicyReader, type ToolRun, type ToolSpec } from '../src/host/tools.ts'
 
@@ -337,4 +337,38 @@ test('read-only sessions cannot change boards, but can still read them', async (
   assert.equal((await docOf(path)).nodes.length, 2, 'other modes write')
   for (const name of ['tessera_create_cards', 'tessera_update_cards', 'tessera_delete_cards', 'tessera_connect', 'tessera_group', 'tessera_layout', 'tessera_create_board', 'tessera_snapshot']) assert.ok(spec(name).mutates, name)
   for (const name of ['tessera_list_boards', 'tessera_read_board', 'tessera_search']) assert.ok(!spec(name).mutates, name)
+})
+
+test('saved templates get fresh ids and keep their structure', () => {
+  const column: CanvasNode = { id: 'c', type: 'group', x: 0, y: 0, width: 10, height: 10, tessera: { kind: 'column', items: ['a', 'ghost'] } }
+  const doc: CanvasDoc = { nodes: [column, note('a')], edges: [{ id: 'e', fromNode: 'c', toNode: 'a' }, { id: 'dangling', fromNode: 'a', toNode: 'ghost' }], extra: 1 }
+  const copy = instantiate(doc)
+  assert.ok(copy.nodes.every(node => node.id !== 'c' && node.id !== 'a'))
+  const newColumn = copy.nodes[0] as CanvasNode
+  assert.deepEqual(newColumn.tessera?.items, [copy.nodes[1]?.id], 'membership follows the new ids, and stale ones drop')
+  assert.equal(copy.edges.length, 1)
+  assert.equal(copy.edges[0]?.fromNode, newColumn.id)
+  assert.equal(copy.extra, 1)
+})
+
+test('automatic snapshots wait for the interval and start only after edits', () => {
+  let now = 1000
+  const auto = new AutoSnapshots(600, () => now)
+  assert.equal(auto.shouldSnapshot('a'), false, 'the first save only starts the clock')
+  now += 599
+  assert.equal(auto.shouldSnapshot('a'), false)
+  now += 1
+  assert.equal(auto.shouldSnapshot('a'), true)
+  assert.equal(auto.shouldSnapshot('a'), false)
+  assert.equal(auto.shouldSnapshot('b'), false, 'boards have separate clocks')
+})
+
+test('old automatic snapshots are pruned, named ones never are', async () => {
+  const path = await board('prune', { nodes: [note('a')], edges: [] })
+  await history.snapshot(path, 'Keep me')
+  for (let i = 0; i < 55; i++) await history.snapshot(path, 'Auto', true)
+  const list = await history.list(path)
+  assert.equal(list.filter(item => item.auto).length, 50)
+  assert.ok(list.some(item => item.name === 'Keep me'))
+  assert.ok(list[0]!.at >= list.at(-1)!.at, 'newest first')
 })

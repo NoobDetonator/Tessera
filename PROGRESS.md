@@ -2,7 +2,7 @@
 
 **Pinned Harness version:** `@deepseek-ai/dsh@0.2.2-rc.1` (tag `dsh-v0.2.2-rc.1`, the npm `latest` when work started).
 
-**Status:** Phases 1 to 4 done. Working on Phase 5.
+**Status:** Phases 1 to 5 done. Working on Phase 6.
 
 Open items and assumptions are in [QUESTIONS.md](QUESTIONS.md). The design is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -14,8 +14,8 @@ Open items and assumptions are in [QUESTIONS.md](QUESTIONS.md). The design is in
 | 2. Card types | Done, tag `phase-2` | Browser checks in `e2e/phase-2.mjs` |
 | 3. Structure | Done, tag `phase-3` | Browser checks in `e2e/phase-3.mjs`, including 2,000 cards |
 | 4. Agent tools, skill, Ask the agent | Done, tag `phase-4` | `e2e/phase-4.mjs` with the real model |
-| 5. Power features | Next | |
-| 6. Extras | Not started | |
+| 5. Power features | Done, tag `phase-5` | Browser checks in `e2e/phase-5.mjs` |
+| 6. Extras | Next | |
 
 ## Phase 1
 
@@ -100,6 +100,20 @@ These are from one run, so treat them as a rough indication. The 267 ms outlier 
 - A Link card the agent creates shows no preview until you click "Load preview", so the agent adding links causes no network calls.
 - The other four skill workflows are written but were not run against the model.
 
+## Phase 5
+
+**Built:** global search (Ctrl+K), the command palette (/), the tag filter that dims non-matching cards, the new-board dialog with all eight built-in templates, save board as template, `[[` autocomplete of cards and boards, a backlink badge on each linked card, and the history timeline with preview, restore and named versions.
+
+**Tested in the browser:** every item above, including a search result on another board, a `/` typed in a note staying text, following links to cards and to boards, restoring a version and then undoing that, and a saved template creating a board with new ids and intact columns.
+
+**Bugs the tests caught, now fixed:**
+- A card linking to one target with two spellings counted twice in the backlinks.
+- The history panel covered cards. It now takes its width from the canvas instead.
+
+**Not verified in the browser:** automatic snapshots. The interval logic and pruning have unit tests with a fake clock, but no browser test waits the ten minutes.
+
+**Limitation:** backlinks only cover cards on the same board. A `[[link]]` to another board opens it, but that board's cards do not list it as a source.
+
 ## Next step
 
-Phase 5: search, command palette, tags and filters, templates, backlinks, version history UI.
+Phase 6: Sketch, presentation mode, focus mode, auto-layout UI, exports, Inbox.

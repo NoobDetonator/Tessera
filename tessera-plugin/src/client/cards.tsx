@@ -2,9 +2,10 @@
  * The card-type registry. Each kind declares its sizing rules and its view;
  * the canvas handles position, selection and resizing around it.
  */
-import { memo, useCallback, useEffect, useMemo, useRef, type ComponentType, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import { newId, type CanvasDoc, type CanvasNode, type CardKind } from '../shared/canvas.ts'
+import { completeLink, openLinkAt, resolveLink } from '../shared/backlinks.ts'
 import { cardTitle } from '../shared/search.ts'
 import type { TesseraStore } from './store.ts'
 
@@ -67,18 +68,41 @@ export function toggleCheckbox(text: string, index: number): string {
   })
 }
 
-/** Find the card a wiki-link name refers to: exact id, then a first line or title match. */
-export function resolveCardName(doc: CanvasDoc, name: string): CanvasNode | undefined {
-  const wanted = name.trim().toLowerCase()
-  return doc.nodes.find(node => node.id === name)
-    ?? doc.nodes.find(node => cardTitle(node).toLowerCase() === wanted)
-}
-
 function TextEditor({ node, store, field = 'text' }: { node: CanvasNode; store: TesseraStore; field?: 'text' }): ReactNode {
   const ref = useRef<HTMLTextAreaElement>(null)
   const key = useRef(`text:${node.id}:${newId()}`)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const latest = useRef(node.text ?? '')
+  const [suggest, setSuggest] = useState<{ start: number; items: readonly string[]; active: number } | undefined>(undefined)
+
+  /** Offer cards and boards while the caret sits inside an open `[[`. */
+  const updateSuggest = useCallback(() => {
+    const element = ref.current
+    if (element === null) return
+    const open = openLinkAt(element.value, element.selectionStart)
+    if (open === undefined) { setSuggest(undefined); return }
+    const needle = open.query.toLowerCase()
+    const names = new Set<string>()
+    for (const other of store.state.doc?.nodes ?? []) {
+      const title = other.id === node.id ? '' : cardTitle(other)
+      if (title !== '' && title.toLowerCase().includes(needle)) names.add(title)
+    }
+    for (const board of store.state.boards) if (board.title.toLowerCase().includes(needle)) names.add(board.title)
+    const items = [...names].slice(0, 8)
+    setSuggest(items.length === 0 ? undefined : { start: open.start, items, active: 0 })
+  }, [store, node.id])
+
+  const accept = (name: string): void => {
+    const element = ref.current
+    if (element === null || suggest === undefined) return
+    const done = completeLink(element.value, element.selectionStart, suggest.start, name)
+    element.value = done.text
+    element.setSelectionRange(done.caret, done.caret)
+    latest.current = done.text
+    setSuggest(undefined)
+    fit()
+    flush()
+  }
 
   const fit = useCallback(() => {
     const element = ref.current
@@ -113,6 +137,7 @@ function TextEditor({ node, store, field = 'text' }: { node: CanvasNode; store: 
   }, [fit, flush, store, node.id])
 
   return (
+    <>
     <textarea
       ref={ref}
       className="t-editor"
@@ -121,16 +146,38 @@ function TextEditor({ node, store, field = 'text' }: { node: CanvasNode; store: 
       onChange={(event) => {
         latest.current = event.target.value
         fit()
+        updateSuggest()
         if (timer.current !== undefined) clearTimeout(timer.current)
         timer.current = setTimeout(flush, 300)
       }}
       onKeyDown={(event) => {
         event.stopPropagation()
+        if (suggest !== undefined) {
+          if (event.key === 'ArrowDown') { event.preventDefault(); setSuggest({ ...suggest, active: Math.min(suggest.items.length - 1, suggest.active + 1) }); return }
+          if (event.key === 'ArrowUp') { event.preventDefault(); setSuggest({ ...suggest, active: Math.max(0, suggest.active - 1) }); return }
+          if (event.key === 'Enter' || event.key === 'Tab') { event.preventDefault(); accept(suggest.items[suggest.active] as string); return }
+          if (event.key === 'Escape') { event.preventDefault(); setSuggest(undefined); return }
+        }
         if (event.key === 'Escape') { event.preventDefault(); store.setEditing(undefined) }
       }}
       onPointerDown={event => { event.stopPropagation() }}
       onDoubleClick={event => { event.stopPropagation() }}
     />
+    {suggest !== undefined ? (
+      <div className="t-suggest" role="listbox" aria-label="Links" data-testid="link-suggest">
+        {suggest.items.map((name, index) => (
+          <button
+            key={name}
+            type="button"
+            role="option"
+            aria-selected={index === suggest.active}
+            // pointerdown, so the editor never loses focus and closes first
+            onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); accept(name) }}
+          >{name}</button>
+        ))}
+      </div>
+    ) : null}
+    </>
   )
 }
 
@@ -144,9 +191,12 @@ const NoteView = memo(function NoteView({ node, store, editing, shell }: CardVie
       event.preventDefault()
       event.stopPropagation()
       const { doc } = store.state
-      const found = doc === undefined ? undefined : resolveCardName(doc, decodeURIComponent(anchor.href.slice(LINK_HOST.length)))
+      const name = decodeURIComponent(anchor.href.slice(LINK_HOST.length))
+      const found = doc === undefined ? undefined : resolveLink(doc, name)
+      const board = store.state.boards.find(item => item.title.toLowerCase() === name.trim().toLowerCase())
       if (found !== undefined) shell.jumpToCard(found.id)
-      else store.notify(`[[${decodeURIComponent(anchor.href.slice(LINK_HOST.length))}]]?`)
+      else if (board !== undefined) shell.enterBoard(board.path)
+      else store.notify(`[[${name}]]?`)
       return
     }
     if (node.tessera?.locked === true) return

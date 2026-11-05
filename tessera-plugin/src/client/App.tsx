@@ -14,6 +14,7 @@ import { CanvasView, type CanvasApi, type ViewState } from './CanvasView.tsx'
 import { cardTitle, type CardShell } from './cards.tsx'
 import { addFiles, addLink, makeColor, makeDocument, makeNote, makeTodo, type Point } from './create.ts'
 import { Dialog, DocumentEditor, Lightbox, Toolbar } from './overlays.tsx'
+import { CommandPalette, GlobalSearch, HistoryPanel, NewBoardDialog, TagFilter, type Command } from './panels.tsx'
 import { useTessera, type TesseraStore } from './store.ts'
 
 export type T = (key: string) => string
@@ -73,12 +74,6 @@ function Menu({ x, y, entries, onClose }: { x: number; y: number; entries: reado
   )
 }
 
-/** Ask for a title and create the board. */
-async function askNewBoard(store: TesseraStore, t: T): Promise<void> {
-  const title = await store.ask({ title: t('sidebar.new'), placeholder: t('prompt.boardTitle') })
-  if (title !== null && title.trim() !== '') await store.createBoard(title.trim())
-}
-
 /** The text an "Ask the agent" chat starts with: which board, and which cards. */
 export function agentContext(store: TesseraStore): string {
   const { path, doc, selection } = store.state
@@ -96,7 +91,7 @@ export function agentContext(store: TesseraStore): string {
 /** Kinds on the left toolbar. */
 const TOOL_KINDS: readonly CardKind[] = ['note', 'document', 'todo', 'link', 'image', 'file', 'color', 'board', 'column', 'frame']
 
-function Sidebar({ store, t }: { store: TesseraStore; t: T }): ReactNode {
+function Sidebar({ store, t, onNewBoard }: { store: TesseraStore; t: T; onNewBoard: () => void }): ReactNode {
   const boards = useTessera(store, state => state.boards)
   const favorites = useTessera(store, state => state.favorites)
   const path = useTessera(store, state => state.path)
@@ -151,7 +146,7 @@ function Sidebar({ store, t }: { store: TesseraStore; t: T }): ReactNode {
     </div>
   )
 
-  const create = (): void => { void askNewBoard(store, t) }
+  const create = (): void => { onNewBoard() }
 
   return (
     <nav className="t-sidebar" aria-label={t('sidebar.boards')}>
@@ -236,6 +231,15 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
   const pickAt = useRef<Point>({ x: 0, y: 0 })
   const [mapView, setMapView] = useState<{ state: ViewState; width: number; height: number } | undefined>(undefined)
   const hiddenIds = useMemo(() => (doc === undefined ? undefined : collapsedMembers(doc)), [doc])
+  const filterTags = useTessera(store, state => state.filterTags)
+  const [newBoard, setNewBoard] = useState(false)
+  const [searching, setSearching] = useState(false)
+  const [commanding, setCommanding] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const dimmedIds = useMemo(() => {
+    if (doc === undefined || filterTags.length === 0) return undefined
+    return new Set(doc.nodes.filter(node => !(node.tessera?.tags ?? []).some(tag => filterTags.includes(tag))).map(node => node.id))
+  }, [doc, filterTags])
 
   const shell = useMemo<CardShell>(() => ({
     openDocument: (id) => { setDocumentId(id) },
@@ -436,9 +440,11 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
   useEffect(() => {
     const typing = (event: Event): boolean => (event.target as HTMLElement | null)?.closest?.('input, textarea, [contenteditable="true"]') != null
     const onKey = (event: KeyboardEvent): void => {
-      if (typing(event) || store.state.path === undefined) return
       const mod = event.ctrlKey || event.metaKey
       const key = event.key.toLowerCase()
+      if (mod && key === 'k') { event.preventDefault(); setSearching(true); return }
+      if (typing(event) || store.state.path === undefined) return
+      if (key === '/' && !mod) { event.preventDefault(); setCommanding(true); return }
       if (mod && key === 'z') { event.preventDefault(); void (event.shiftKey ? store.redo() : store.undo()); return }
       if (mod && key === 'y') { event.preventDefault(); void store.redo(); return }
       if (mod && event.code === 'Digit0') { event.preventDefault(); canvas.current?.fitAll(); return }
@@ -578,6 +584,50 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
 
   const closeMenu = useCallback(() => { setMenu(undefined) }, [])
 
+  const openHit = useCallback((board: string, id?: string) => {
+    void store.open(board).then(() => {
+      if (id === undefined) return
+      // The canvas mounts after the document arrives, so wait for it before moving the view.
+      const start = Date.now()
+      const jump = (): void => {
+        const node = store.node(id)
+        if (node !== undefined && canvas.current !== null) {
+          canvas.current.centerOn(node)
+          store.select(new Set([id]))
+        } else if (Date.now() - start < 2000) setTimeout(jump, 40)
+      }
+      jump()
+    })
+  }, [store])
+
+  const saveTemplate = useCallback(() => {
+    const { path: current } = store.state
+    if (current === undefined) return
+    void store.ask({ title: t('template.saveAs'), placeholder: t('template.name'), value: current.replace(/\.canvas$/i, '') }).then(async (name) => {
+      if (name === null || name.trim() === '') return
+      await store.settle()
+      await api.request('/templates/save', { path: current, name: name.trim() })
+      store.notify(t('template.savedNotice'))
+    })
+  }, [store, t])
+
+  const commands = useMemo<Command[]>(() => {
+    const center = (): Point => canvas.current?.screenCenter() ?? { x: 0, y: 0 }
+    const hasBoard = path !== undefined
+    return [
+      { id: 'search', label: t('search.label'), shortcut: 'Ctrl+K', run: () => { setSearching(true) } },
+      { id: 'new-board', label: t('sidebar.new'), run: () => { setNewBoard(true) } },
+      ...TOOL_KINDS.map((kind): Command => ({ id: `add-${kind}`, label: `${t('palette.add')} ${t(`card.${kind}`)}`, disabled: !hasBoard, run: () => { place(kind, center()) } })),
+      { id: 'undo', label: t('top.undo'), shortcut: 'Ctrl+Z', disabled: !hasBoard, run: () => { void store.undo() } },
+      { id: 'redo', label: t('top.redo'), shortcut: 'Ctrl+Shift+Z', disabled: !hasBoard, run: () => { void store.redo() } },
+      { id: 'fit', label: t('top.fit'), shortcut: 'Ctrl+0', disabled: !hasBoard, run: () => { canvas.current?.fitAll() } },
+      { id: 'select-all', label: t('menu.selectAll'), shortcut: 'Ctrl+A', disabled: !hasBoard, run: () => { store.select(new Set(store.state.doc?.nodes.map(node => node.id))) } },
+      { id: 'history', label: t('history.title'), disabled: !hasBoard, run: () => { setHistoryOpen(true) } },
+      { id: 'save-template', label: t('template.saveAs'), disabled: !hasBoard, run: saveTemplate },
+      { id: 'ask', label: t('top.ask'), disabled: !hasBoard, run: () => { askAgent(agentContext(store)) } },
+    ]
+  }, [path, place, saveTemplate, store, t, askAgent])
+
   if (!available) {
     return <div className="t-root"><div className="t-empty"><h2>{t('unavailable.title')}</h2><p>{t('unavailable.body')}</p></div></div>
   }
@@ -586,7 +636,7 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
 
   return (
     <div className="t-root" data-testid="tessera-root">
-      <Sidebar store={store} t={t} />
+      <Sidebar store={store} t={t} onNewBoard={() => { setNewBoard(true) }} />
       <main className="t-main">
         {path === undefined ? (
           <div className="t-empty">
@@ -595,7 +645,7 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
             <button
               type="button"
               className="t-btn t-btn-primary"
-              onClick={() => { void askNewBoard(store, t) }}
+              onClick={() => { setNewBoard(true) }}
             >{t('empty.create')}</button>
           </div>
         ) : (
@@ -615,6 +665,8 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
                 ))}
               </nav>
               <SaveStatus store={store} t={t} />
+              <TagFilter store={store} t={t} />
+              <button type="button" className="t-btn" aria-pressed={historyOpen} data-testid="history-button" onClick={() => { setHistoryOpen(!historyOpen) }}>{t('history.title')}</button>
               <button
                 type="button"
                 className="t-btn"
@@ -634,6 +686,7 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
               <div className="t-empty"><h2>{t('load.failed')}</h2><p>{loadError}</p></div>
             ) : doc !== undefined ? (
               <div className="t-stage">
+                <div className="t-stage-canvas">
                 <CanvasView
                   store={store}
                   t={t}
@@ -645,6 +698,7 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
                   dropTargetAt={dropTargetAt}
                   onViewChange={onViewChange}
                   hiddenIds={hiddenIds}
+                  dimmedIds={dimmedIds}
                   placeKind={{ active: armed !== undefined, place: (world) => { if (armed !== undefined) { setArmed(undefined); place(armed, world) } } }}
                 />
                 <Toolbar
@@ -661,6 +715,8 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
                 <SelectionBar store={store} t={t} />
                 <EdgeBar store={store} t={t} />
                 <Minimap store={store} canvas={canvas} view={mapView} t={t} />
+                </div>
+                {historyOpen && path !== undefined ? <HistoryPanel key={path} store={store} path={path} t={t} onClose={() => { setHistoryOpen(false) }} /> : null}
               </div>
             ) : <div className="t-empty" aria-busy="true" />}
           </>
@@ -670,6 +726,9 @@ export function App({ store, t, askAgent }: { store: TesseraStore; t: T; askAgen
         {notice !== undefined ? <div className="t-banner" role="status">{notice}</div> : null}
       </main>
       {menu !== undefined ? <Menu x={menu.x} y={menu.y} entries={menu.entries} onClose={closeMenu} /> : null}
+      {newBoard ? <NewBoardDialog store={store} t={t} onClose={() => { setNewBoard(false) }} /> : null}
+      {searching ? <GlobalSearch t={t} onClose={() => { setSearching(false) }} onOpen={(hit) => { openHit(hit.board, hit.id) }} /> : null}
+      {commanding ? <CommandPalette commands={commands} t={t} onClose={() => { setCommanding(false) }} /> : null}
       {lightbox !== undefined ? <Lightbox store={store} id={lightbox} t={t} onClose={() => { setLightbox(undefined) }} /> : null}
       {dialog !== undefined ? <Dialog request={dialog} t={t} onClose={(value) => { store.answerDialog(value) }} /> : null}
       <input

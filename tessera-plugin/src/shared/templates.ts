@@ -123,3 +123,23 @@ export function buildTemplate(id: string): CanvasDoc | undefined {
   const build = BUILDERS[id as BuiltinTemplateId] as (() => CanvasNode[]) | undefined
   return build === undefined ? undefined : { nodes: build(), edges: [] }
 }
+
+/** A copy of a saved board with fresh ids, so a template can be used many times. */
+export function instantiate(doc: CanvasDoc): CanvasDoc {
+  const ids = new Map(doc.nodes.map(node => [node.id, newId()]))
+  return {
+    ...doc,
+    nodes: doc.nodes.map((node) => {
+      const items = node.tessera?.items
+      return {
+        ...node,
+        id: ids.get(node.id) as string,
+        ...(Array.isArray(items) ? { tessera: { ...node.tessera, items: items.flatMap(id => ids.get(id) ?? []) } } : {}),
+      }
+    }),
+    edges: doc.edges.flatMap((edge) => {
+      const fromNode = ids.get(edge.fromNode), toNode = ids.get(edge.toNode)
+      return fromNode === undefined || toNode === undefined ? [] : [{ ...edge, id: newId(), fromNode, toNode }]
+    }),
+  }
+}

@@ -15,7 +15,7 @@ import { API_PREFIX, BOOT_GLOBAL, type BootGlobals } from '../shared/protocol.ts
 import { boardRoutes, createApiHandler, EventHub, isLoopbackBind } from './http.ts'
 import type { WebFetcher } from './linkpreview.ts'
 import { workspaceRoutes } from './workspace.ts'
-import { HistoryStore } from './history.ts'
+import { AutoSnapshots, HistoryStore } from './history.ts'
 import { SKILL_CONTENT, SKILL_DESCRIPTION, SKILL_NAME } from './skill.ts'
 import { BoardStore, normalizeBoardPath, TesseraError } from './store.ts'
 import { guardReadOnly, toolSpecs, type SandboxPolicyReader, type ToolRun } from './tools.ts'
@@ -34,6 +34,8 @@ export interface Config {
   maxJsonBytes: number
   /** How long a delete waits for the user before counting as declined. */
   confirmTimeoutMs: number
+  /** Minutes between automatic history snapshots of a board being edited. */
+  autoSnapshotMinutes: number
 }
 
 export const Config: z<Config> = z.object({
@@ -42,6 +44,7 @@ export const Config: z<Config> = z.object({
   maxAssetBytes: z.natural().min(1).default(1024 * 1024 * 1024),
   maxJsonBytes: z.natural().min(1).default(64 * 1024 * 1024),
   confirmTimeoutMs: z.natural().min(1000).default(120_000),
+  autoSnapshotMinutes: z.number().min(0.01).default(10),
 })
 
 export async function apply(ctx: Context, config: Config): Promise<void> {
@@ -74,6 +77,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   store.on('board-removed', (event) => { hub.broadcast({ type: 'board-removed', ...event }) })
 
   const history = new HistoryStore(store, root)
+  const autoSnapshots = new AutoSnapshots(config.autoSnapshotMinutes * 60_000)
+  store.on('saved', ({ path }) => {
+    if (!autoSnapshots.shouldSnapshot(path)) return
+    history.snapshot(path, 'Auto', true).catch((error: Error) => { ctx.logger.warn(`Automatic snapshot of ${path} failed: ${error.message}`) })
+  })
 
   // Delete confirmations: a question to whichever tab answers first.
   const waiting = new Map<string, (approved: boolean) => void>()

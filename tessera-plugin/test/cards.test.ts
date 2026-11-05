@@ -5,6 +5,8 @@ import { isChecklistText } from '../src/shared/classify.ts'
 import { alignRects, autoPlace, distributeRects, routeEdge, snapMove, snapToGrid } from '../src/shared/geometry.ts'
 import { intersects } from '../src/shared/canvas.ts'
 import { assertPublicUrl, isPrivateAddress, parseOpenGraph } from '../src/host/linkpreview.ts'
+import { backlinkIndex, completeLink, extractLinks, openLinkAt, resolveLink } from '../src/shared/backlinks.ts'
+import type { CanvasNode } from '../src/shared/canvas.ts'
 
 test('to-do text round trips, keeping due dates in the text', () => {
   const text = '- [ ] Buy milk 📅 2026-11-10\n- [x] Call Ana\n- [ ] '
@@ -156,4 +158,28 @@ test('edge routes end on the card sides', () => {
     assert.ok(route.d.startsWith('M100 50'), routing)
   }
   assert.deepEqual(routeEdge({ fromSide: 'bottom', toSide: 'top' }, from, to).start, { x: 50, y: 100 })
+})
+
+const textNode = (id: string, text: string): CanvasNode => ({ id, type: 'text', x: 0, y: 0, width: 10, height: 10, text })
+
+test('wiki links are found outside code only', () => {
+  assert.deepEqual(extractLinks('see [[One]] and [[ Two ]]\n```\n[[not this]]\n```\n[[Three]]'), ['One', 'Two', 'Three'])
+  assert.deepEqual(extractLinks('no links, [single], [[unclosed'), [])
+})
+
+test('backlinks index who points at whom', () => {
+  const doc = { nodes: [textNode('a', '# Alpha'), textNode('b', 'links to [[Alpha]] twice [[alpha]]'), textNode('c', '[[a]] by id'), textNode('d', '[[d]] and [[missing]]')], edges: [] }
+  assert.deepEqual(backlinkIndex(doc).get('a'), ['b', 'c'], 'one entry per source, by title or id, any case')
+  assert.equal(backlinkIndex(doc).get('d'), undefined, 'a card linking to itself does not count')
+  assert.equal(resolveLink(doc, 'ALPHA')?.id, 'a')
+  assert.equal(resolveLink(doc, 'ghost'), undefined)
+})
+
+test('link autocomplete finds the open bracket and finishes the link', () => {
+  assert.deepEqual(openLinkAt('hi [[Al', 7), { start: 3, query: 'Al' })
+  assert.equal(openLinkAt('hi [[Al]] there', 15), undefined)
+  assert.equal(openLinkAt('no brackets', 5), undefined)
+  assert.equal(openLinkAt('[[line\nbreak', 12), undefined)
+  assert.deepEqual(completeLink('hi [[Al rest', 7, 3, 'Alpha'), { text: 'hi [[Alpha]] rest', caret: 12 })
+  assert.deepEqual(completeLink('[[Al]]', 4, 0, 'Alpha'), { text: '[[Alpha]]', caret: 9 }, 'a typed closing pair is not doubled')
 })

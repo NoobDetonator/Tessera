@@ -438,8 +438,8 @@ export class TesseraStore {
   }
 
   /** Create a board and open it. */
-  async createBoard(title: string): Promise<string> {
-    const { path } = await api.createBoard(title)
+  async createBoard(title: string, template?: string): Promise<string> {
+    const { path } = await api.createBoard(title, template === undefined ? {} : { template })
     await this.refreshBoards()
     await this.open(path)
     return path

@@ -6,7 +6,7 @@ const { page } = app
 try {
   await app.shot('01-empty')
   await page.getByRole('button', { name: 'Create a board' }).click()
-  await page.locator('.t-dialog input').fill('Smoke Board')
+  await page.locator('.t-dialog input').first().fill('Smoke Board')
   await page.keyboard.press('Enter')
   const canvas = page.getByTestId('tessera-canvas')
   await canvas.waitFor()

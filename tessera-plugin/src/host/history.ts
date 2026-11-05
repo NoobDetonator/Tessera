@@ -92,3 +92,31 @@ export class HistoryStore {
     await this.store.apply(path, diffDocs(doc, target), { origin: 'user', label: 'Restore version' })
   }
 }
+
+/**
+ * Decides when an edited board gets an automatic snapshot: at most one per
+ * interval, and only after edits. The first save after opening only starts the clock.
+ */
+export class AutoSnapshots {
+  private readonly last = new Map<string, number>()
+  private readonly intervalMs: number
+  private readonly now: () => number
+
+  constructor(intervalMs: number, now: () => number = Date.now) {
+    this.intervalMs = intervalMs
+    this.now = now
+  }
+
+  /** @returns whether this save should take a snapshot. */
+  shouldSnapshot(path: string): boolean {
+    const now = this.now()
+    const previous = this.last.get(path)
+    if (previous === undefined) {
+      this.last.set(path, now)
+      return false
+    }
+    if (now - previous < this.intervalMs) return false
+    this.last.set(path, now)
+    return true
+  }
+}
