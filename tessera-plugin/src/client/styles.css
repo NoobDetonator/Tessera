@@ -327,8 +327,8 @@
 .t-todo-add:hover { color: var(--dsw-alias-label-primary); }
 
 .t-color { display: flex; flex-direction: column; width: 100%; height: 100%; border-radius: inherit; overflow: hidden; }
-.t-swatch { position: relative; flex: 1 1 0; min-height: 40px; cursor: pointer; }
-.t-swatch input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.t-swatch { position: relative; flex: 1 1 0; min-height: 40px; }
+.t-swatch input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; pointer-events: none; }
 .t-color-values { display: flex; flex-direction: column; padding: 4px 6px; flex: none; }
 .t-color-values button { padding: 0 4px; height: 20px; border: 0; border-radius: 4px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-family: var(--dsw-font-mono, ui-monospace, monospace); font-size: 11px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: copy; }
 .t-color-values button:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
@@ -359,3 +359,59 @@
 .t-lightbox-close { position: absolute; right: 16px; top: 16px; color: #fff; }
 .t-lightbox-close:hover:not(:disabled) { background: rgb(255 255 255 / 16%); color: #fff; }
 .t-lightbox-caption { width: min(520px, 100%); height: 32px; padding: 0 8px; border: 0; border-radius: 6px; outline: none; text-align: center; background: rgb(255 255 255 / 12%); color: #fff; font: inherit; }
+
+.t-root { --t-preset-1: var(--t-color-red); --t-preset-2: var(--t-color-orange); --t-preset-3: var(--t-color-yellow); --t-preset-4: var(--t-color-green); --t-preset-5: var(--t-color-cyan); --t-preset-6: var(--t-color-purple); }
+.t-card.t-lod { box-shadow: none; background: var(--dsw-alias-border-l3); transition: none; }
+.t-card.t-lod.t-color-strip, .t-card.t-lod.t-color-full { border-top: 0; background: color-mix(in srgb, var(--t-card-color) 60%, var(--dsw-alias-bg-layer-1)); }
+.t-card.t-lod.t-selected { box-shadow: 0 0 0 calc(2px * var(--t-inverse-zoom, 1)) var(--t-accent); }
+.t-card.t-drop-target { box-shadow: 0 0 0 2px var(--t-accent), 0 0 0 6px color-mix(in srgb, var(--t-accent) 24%, transparent); }
+
+/* A Frame sits behind its cards and lets pointers through, except its title and handles. */
+.t-card.t-kind-frame { pointer-events: none; background: color-mix(in srgb, var(--t-card-color, var(--dsw-alias-label-primary)) 5%, transparent); box-shadow: 0 0 0 0.5px var(--dsw-alias-border-l3); }
+.t-card.t-kind-frame.t-selected { box-shadow: 0 0 0 1.5px var(--t-accent); }
+.t-card.t-kind-frame.t-dragging { box-shadow: 0 0 0 1.5px var(--t-accent); }
+.t-card.t-kind-frame.t-color-strip { border-top: 0; }
+.t-card.t-kind-frame.t-color-full { background: color-mix(in srgb, var(--t-card-color) 16%, transparent); }
+.t-kind-frame .t-handle, .t-kind-frame .t-anchor, .t-frame-title { pointer-events: auto; }
+.t-frame { width: 100%; height: 100%; border-radius: inherit; background-size: cover; background-position: center; }
+.t-frame-title { display: inline-flex; max-width: 100%; padding: 6px 10px; font-weight: 600; color: var(--dsw-alias-label-secondary); cursor: grab; }
+
+.t-group-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t-group-input { min-width: 80px; width: 100%; padding: 0 2px; border: 0; border-radius: 4px; outline: 1.5px solid var(--t-accent); background: var(--dsw-alias-bg-base); color: inherit; font: inherit; font-weight: 600; user-select: text; }
+
+.t-card.t-kind-column { background: color-mix(in srgb, var(--dsw-alias-label-primary) 4%, var(--dsw-alias-bg-base)); }
+.t-card.t-kind-column.t-color-full { background: color-mix(in srgb, var(--t-card-color) 16%, var(--dsw-alias-bg-base)); }
+.t-column-head { display: flex; align-items: center; gap: 4px; height: 44px; padding: 0 8px 0 6px; font-weight: 600; }
+.t-column-head .t-group-label { flex: 1; min-width: 0; }
+.t-column-head .t-group-input { flex: 1; }
+.t-column-count { flex: none; padding: 0 6px; color: var(--dsw-alias-label-tertiary); font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.t-btn-icon { width: 28px; padding: 0; }
+
+.t-board { display: flex; flex-direction: column; height: 100%; border-radius: inherit; overflow: hidden; }
+.t-board-preview { flex: 1; min-height: 0; padding: 6px; background: color-mix(in srgb, var(--dsw-alias-label-primary) 4%, var(--dsw-alias-bg-base)); background-image: radial-gradient(circle at 1px 1px, var(--dsw-alias-border-l3) 1px, transparent 0); background-size: 12px 12px; }
+.t-board-mini { display: block; width: 100%; height: 100%; }
+.t-board-empty { width: 100%; height: 100%; }
+.t-mini-card { fill: var(--dsw-alias-label-tertiary); opacity: 0.55; }
+.t-mini-group { fill: var(--dsw-alias-label-tertiary); opacity: 0.12; }
+.t-board-foot { flex: none; display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; font-weight: 600; }
+.t-board-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.t-bar {
+  position: absolute; left: 50%; top: 10px; transform: translateX(-50%); z-index: 25;
+  display: flex; align-items: center; gap: 2px; max-width: calc(100% - 96px); padding: 4px 6px; overflow-x: auto;
+  border-radius: var(--t-radius); background: var(--dsw-alias-bg-layer-1);
+  box-shadow: var(--dsw-elevation-panel, 0 4px 16px rgb(0 0 0 / 16%));
+}
+.t-dot { flex: none; position: relative; width: 18px; height: 18px; margin: 0 2px; padding: 0; border: 0; border-radius: 50%; corner-shape: round; cursor: pointer; box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 20%); }
+.t-dot[aria-pressed="true"] { box-shadow: 0 0 0 1.5px var(--dsw-alias-bg-layer-1), 0 0 0 3px var(--t-accent); }
+.t-dot-none { background: linear-gradient(135deg, transparent 46%, var(--dsw-alias-state-error-primary) 46%, var(--dsw-alias-state-error-primary) 54%, transparent 54%), var(--dsw-alias-bg-base); }
+.t-dot-custom { display: inline-block; background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); overflow: hidden; }
+.t-dot-custom input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+.t-minimap {
+  --t-map-card: var(--dsw-alias-label-tertiary);
+  position: absolute; right: 12px; bottom: 12px; z-index: 20;
+  border-radius: var(--t-radius); background: var(--dsw-alias-bg-layer-1);
+  box-shadow: var(--dsw-elevation-panel, 0 4px 16px rgb(0 0 0 / 16%));
+  cursor: pointer; touch-action: none;
+}

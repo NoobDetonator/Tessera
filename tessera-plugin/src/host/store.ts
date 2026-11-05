@@ -12,6 +12,8 @@ import { randomBytes } from 'node:crypto'
 import { CanvasParseError, parseCanvas, serializeCanvas, type CanvasDoc } from '../shared/canvas.ts'
 import { applyChange, composeChanges, diffDocs, invertChange, isEmptyChange, type Change } from '../shared/change.ts'
 import { mergeDocs } from '../shared/merge.ts'
+import { autoPlace } from '../shared/geometry.ts'
+import { extractCards } from '../shared/structure.ts'
 
 export type ChangeOrigin = 'user' | 'agent' | 'disk' | 'history'
 
@@ -39,6 +41,8 @@ interface UndoEntry {
   forward: Change
   label: string | undefined
   coalesce: string | undefined
+  /** A second board this step also changed, so one undo restores both. */
+  linked?: { path: string; inverse: Change; forward: Change }
 }
 
 interface OpenBoard {
@@ -67,6 +71,10 @@ export interface StoreEvents {
 }
 
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
+
+/** Whether a change could alter which boards a board points at. */
+const touchesBoardCards = (change: Change): boolean =>
+  Object.values(change.nodes ?? {}).some(node => node === null || (typeof node.file === 'string' && node.file.toLowerCase().endsWith('.canvas')))
 
 export class TesseraError extends Error {
   override readonly name = 'TesseraError'
@@ -280,6 +288,7 @@ export class BoardStore extends EventEmitter<StoreEvents> {
     }
     this.emit('change', { path, rev: board.rev, change, origin: meta.origin, clientId: meta.clientId, label: meta.label })
     this.schedule(board)
+    if (touchesBoardCards(change)) this.emit('boards-changed')
     return board.rev
   }
 
@@ -287,6 +296,32 @@ export class BoardStore extends EventEmitter<StoreEvents> {
   sealUndo(path: string): void {
     const top = this.boards.get(path)?.undo.at(-1)
     if (top !== undefined) top.coalesce = undefined
+  }
+
+  /**
+   * Move cards to another board as one undo step on the source board.
+   * @returns the ids moved.
+   * @throws TesseraError when a board is missing or nothing matches.
+   */
+  async transfer(from: string, to: string, ids: readonly string[], meta: ApplyMeta): Promise<string[]> {
+    if (from === to) throw new TesseraError('same-board', 'The cards are already on that board.')
+    const source = await this.open(from)
+    const target = await this.open(to)
+    const { nodes, edges, removal } = extractCards(source.doc, ids)
+    if (nodes.length === 0) throw new TesseraError('no-cards', 'None of those cards are on this board.')
+    const minX = Math.min(...nodes.map(node => node.x)), minY = Math.min(...nodes.map(node => node.y))
+    const box = { width: Math.max(...nodes.map(node => node.x + node.width)) - minX, height: Math.max(...nodes.map(node => node.y + node.height)) - minY }
+    const [spot] = autoPlace(target.doc.nodes, [box])
+    const change: Change = {
+      nodes: Object.fromEntries(nodes.map(node => [node.id, { ...node, x: node.x - minX + (spot?.x ?? 0), y: node.y - minY + (spot?.y ?? 0) }])),
+      edges: Object.fromEntries(edges.map(edge => [edge.id, edge])),
+    }
+    const inverse = invertChange(target.doc, change)
+    await this.apply(to, change, { ...meta, undoable: false })
+    await this.apply(from, removal, meta)
+    const top = source.undo.at(-1)
+    if (top !== undefined) top.linked = { path: to, inverse, forward: change }
+    return nodes.map(node => node.id)
   }
 
   /** Revert the latest undo step. */
@@ -299,6 +334,7 @@ export class BoardStore extends EventEmitter<StoreEvents> {
     board.rev++
     this.emit('change', { path, rev: board.rev, change: entry.inverse, origin: 'history', label: entry.label })
     this.schedule(board)
+    if (entry.linked !== undefined) await this.apply(entry.linked.path, entry.linked.inverse, { origin: 'history', undoable: false })
     return { rev: board.rev, label: entry.label }
   }
 
@@ -312,6 +348,7 @@ export class BoardStore extends EventEmitter<StoreEvents> {
     board.rev++
     this.emit('change', { path, rev: board.rev, change: entry.forward, origin: 'history', label: entry.label })
     this.schedule(board)
+    if (entry.linked !== undefined) await this.apply(entry.linked.path, entry.linked.forward, { origin: 'history', undoable: false })
     return { rev: board.rev, label: entry.label }
   }
 

@@ -351,6 +351,12 @@ export function boardRoutes(store: BoardStore, hub: EventHub): Map<string, Route
     const path = normalizeBoardPath((await json()).path)
     return (await store.redo(path)) ?? { rev: null }
   })
+  routes.set('POST /board/transfer', async ({ json }) => {
+    const body = await json()
+    if (!Array.isArray(body.ids) || !body.ids.every(id => typeof id === 'string')) throw new TesseraError('bad-ids', 'ids must be strings')
+    const moved = await store.transfer(normalizeBoardPath(body.from), normalizeBoardPath(body.to), body.ids as string[], { origin: 'user', label: 'Move to board' })
+    return { moved }
+  })
   routes.set('POST /board/seal', async ({ json }) => {
     store.sealUndo(normalizeBoardPath((await json()).path))
     return { ok: true }

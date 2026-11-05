@@ -9,7 +9,6 @@ import type { TesseraStore } from './store.ts'
 
 export interface CardViewProps {
   node: CanvasNode
-  doc: CanvasDoc
   store: TesseraStore
   editing: boolean
   selected: boolean
@@ -38,6 +37,8 @@ export interface CardType {
   aspectLock?: boolean
   /** Double-click starts in-place text editing. */
   editable?: boolean
+  /** Only the width is user-resizable, even though the height is not measured from content. */
+  widthOnly?: boolean
   view: ComponentType<CardViewProps>
 }
 
@@ -143,7 +144,7 @@ function TextEditor({ node, store, field = 'text' }: { node: CanvasNode; store: 
   )
 }
 
-const NoteView = memo(function NoteView({ node, doc, store, editing, shell }: CardViewProps) {
+const NoteView = memo(function NoteView({ node, store, editing, shell }: CardViewProps) {
   const rendered = useMemo(() => renderWikiLinks(node.text ?? ''), [node.text])
   if (editing) return <div className="t-note"><TextEditor node={node} store={store} /></div>
   const onClick = (event: React.MouseEvent<HTMLDivElement>): void => {
@@ -152,7 +153,8 @@ const NoteView = memo(function NoteView({ node, doc, store, editing, shell }: Ca
     if (anchor?.href.startsWith(LINK_HOST)) {
       event.preventDefault()
       event.stopPropagation()
-      const found = resolveCardName(doc, decodeURIComponent(anchor.href.slice(LINK_HOST.length)))
+      const { doc } = store.state
+      const found = doc === undefined ? undefined : resolveCardName(doc, decodeURIComponent(anchor.href.slice(LINK_HOST.length)))
       if (found !== undefined) shell.jumpToCard(found.id)
       else store.notify(`[[${decodeURIComponent(anchor.href.slice(LINK_HOST.length))}]]?`)
       return

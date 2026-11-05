@@ -1,8 +1,12 @@
 /** Views for the media and structured card kinds. Importing this module registers them. */
-import { memo, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import { contrastText, formatHsl, formatRgb, formatTodo, hexToRgb, normalizeHex, parseTodo, rgbToHsl, splitDocument, videoEmbed, type TodoItem } from '../shared/cardtext.ts'
+import { boundsOf, type CanvasDoc } from '../shared/canvas.ts'
+import { columnMembers } from '../shared/classify.ts'
+import { visualRect } from '../shared/structure.ts'
 import { api, fileUrl } from './bridge.ts'
+import { copyPalette } from './bars.tsx'
 import { cardTitle, registerCard, type CardViewProps } from './cards.tsx'
 import { loadPreview } from './create.ts'
 
@@ -270,17 +274,29 @@ const ColorView = memo(function ColorView({ node, store, t }: CardViewProps) {
   const values = [hex, formatRgb(rgb), formatHsl(rgbToHsl(rgb))]
   const [copied, setCopied] = useState<string | undefined>(undefined)
   const editKey = useRef(`color:${node.id}`)
+  const picker = useRef<HTMLInputElement>(null)
   return (
     <div className="t-color">
-      <label className="t-swatch" style={{ background: hex, color: contrastText(hex) }} data-interactive="" title={t('color.pick')}>
+      {/* The swatch is most of the card, so a click must select and drag it like any card. Double-click picks a color. */}
+      <div
+        className="t-swatch"
+        style={{ background: hex, color: contrastText(hex) }}
+        title={t('color.pick')}
+        onDoubleClick={(event) => {
+          event.stopPropagation()
+          picker.current?.showPicker()
+        }}
+      >
         <input
+          ref={picker}
           type="color"
           value={hex}
           disabled={node.tessera?.locked === true}
           aria-label={t('color.pick')}
+          tabIndex={-1}
           onChange={(event) => { store.patchNode(node.id, { text: event.target.value }, { coalesce: editKey.current, label: 'Change color' }) }}
         />
-      </label>
+      </div>
       <div className="t-color-values">
         {values.map(value => (
           <button
@@ -314,6 +330,133 @@ const DocumentView = memo(function DocumentView({ node, shell, t }: CardViewProp
   )
 })
 
+/** A label that turns into an input while its card is in edit mode. */
+function GroupLabel({ node, store, editing, placeholder }: { node: CardViewProps['node']; store: CardViewProps['store']; editing: boolean; placeholder: string }): ReactNode {
+  const label = node.label ?? ''
+  if (!editing) return <span className="t-group-label" title={label}>{label === '' ? placeholder : label}</span>
+  return (
+    <input
+      className="t-group-input"
+      type="text"
+      defaultValue={label}
+      placeholder={placeholder}
+      aria-label={placeholder}
+      autoFocus
+      onFocus={(event) => { event.target.select() }}
+      onPointerDown={stop}
+      onDoubleClick={stop}
+      onKeyDown={(event) => {
+        event.stopPropagation()
+        if (event.key === 'Enter' || event.key === 'Escape') { event.preventDefault(); if (event.key === 'Escape') event.currentTarget.value = label; event.currentTarget.blur() }
+      }}
+      onBlur={(event) => {
+        const next = event.target.value.trim()
+        if (next !== label) store.patchNode(node.id, { label: next }, { label: 'Rename' })
+        store.setEditing(undefined)
+      }}
+    />
+  )
+}
+
+const FrameView = memo(function FrameView({ node, store, editing, t }: CardViewProps) {
+  return (
+    <div className="t-frame" style={typeof node.background === 'string' ? { backgroundImage: `url("${fileUrl(node.background)}")` } : undefined}>
+      <div className="t-frame-title"><GroupLabel node={node} store={store} editing={editing} placeholder={t('card.frame')} /></div>
+    </div>
+  )
+})
+
+const ColumnView = memo(function ColumnView({ node, store, editing, t }: CardViewProps) {
+  const collapsed = node.tessera?.collapsed === true
+  const items = Array.isArray(node.tessera?.items) ? node.tessera.items : undefined
+  const count = items?.length ?? (store.state.doc !== undefined ? columnMembers(store.state.doc, node).length : 0)
+  const hasColors = store.state.doc !== undefined && columnMembers(store.state.doc, node).some(member => normalizeHex(member.text ?? '') !== undefined)
+  return (
+    <div className="t-column">
+      <div className="t-column-head">
+        <button
+          type="button"
+          className="t-btn t-btn-icon"
+          data-interactive=""
+          aria-label={t(collapsed ? 'column.expand' : 'column.collapse')}
+          aria-expanded={!collapsed}
+          title={t(collapsed ? 'column.expand' : 'column.collapse')}
+          onClick={() => { store.patchMeta(node.id, { collapsed: !collapsed }, { label: t(collapsed ? 'column.expand' : 'column.collapse') }) }}
+        >{collapsed ? '▸' : '▾'}</button>
+        <GroupLabel node={node} store={store} editing={editing} placeholder={t('card.column')} />
+        <span className="t-column-count">{count}</span>
+        {hasColors ? (
+          <>
+            <button type="button" className="t-chip" data-interactive="" title={t('palette.copy')} onClick={() => { copyPalette(store, node.id, 'css', t) }}>CSS</button>
+            <button type="button" className="t-chip" data-interactive="" title={t('palette.copy')} onClick={() => { copyPalette(store, node.id, 'json', t) }}>JSON</button>
+          </>
+        ) : null}
+      </div>
+    </div>
+  )
+})
+
+function MiniBoard({ doc }: { doc: CanvasDoc }): ReactNode {
+  const rects = useMemo(() => doc.nodes.slice(0, 300).map(node => ({ id: node.id, group: node.type === 'group', color: node.color, ...visualRect(node) })), [doc])
+  const box = boundsOf(rects)
+  if (box === undefined) return <div className="t-board-empty" />
+  const pad = Math.max(box.width, box.height) * 0.04
+  return (
+    <svg className="t-board-mini" viewBox={`${box.x - pad} ${box.y - pad} ${box.width + pad * 2} ${box.height + pad * 2}`} preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      {rects.map(rect => (
+        <rect
+          key={rect.id}
+          x={rect.x}
+          y={rect.y}
+          width={rect.width}
+          height={rect.height}
+          rx={Math.min(rect.width, rect.height) * 0.04}
+          className={rect.group ? 't-mini-group' : 't-mini-card'}
+        />
+      ))}
+    </svg>
+  )
+}
+
+const BoardView = memo(function BoardView({ node, store, t }: CardViewProps) {
+  const path = typeof node.file === 'string' ? node.file : undefined
+  const [preview, setPreview] = useState<CanvasDoc | undefined>(undefined)
+  const [missing, setMissing] = useState(false)
+  useEffect(() => {
+    if (path === undefined) return undefined
+    let alive = true
+    const load = (): void => {
+      api.readBoard(path).then((state) => {
+        if (alive) { setPreview(state.doc); setMissing(false) }
+      }).catch(() => { if (alive) setMissing(true) })
+    }
+    load()
+    // Live: follow the nested board's revisions, at most a few times a second.
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const unwatch = store.watchBoard(path, () => {
+      if (timer === undefined) timer = setTimeout(() => { timer = undefined; load() }, 300)
+    })
+    return () => {
+      alive = false
+      unwatch()
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [path, store])
+  const title = path === undefined ? '' : path.slice(path.lastIndexOf('/') + 1).replace(/\.canvas$/i, '')
+  return (
+    <div className="t-board">
+      <div className="t-board-preview">{missing ? <div className="t-missing"><span>{t('card.missingBoard')}</span></div> : preview !== undefined ? <MiniBoard doc={preview} /> : null}</div>
+      <div className="t-board-foot">
+        <span className="t-board-title" title={title}>{title}</span>
+        {preview !== undefined ? <span className="t-column-count">{preview.nodes.length}</span> : null}
+      </div>
+    </div>
+  )
+})
+
+registerCard({ kind: 'frame', label: 'card.frame', minWidth: 120, minHeight: 80, autoHeight: false, editable: true, view: FrameView })
+registerCard({ kind: 'column', label: 'card.column', minWidth: 160, minHeight: 44, autoHeight: false, editable: true, widthOnly: true, view: ColumnView })
+registerCard({ kind: 'board', label: 'card.board', minWidth: 160, minHeight: 120, autoHeight: false, view: BoardView })
 registerCard({ kind: 'image', label: 'card.image', minWidth: 48, minHeight: 48, autoHeight: false, aspectLock: true, view: ImageView })
 registerCard({ kind: 'link', label: 'card.link', minWidth: 200, minHeight: 96, autoHeight: false, view: LinkView })
 registerCard({ kind: 'file', label: 'card.file', minWidth: 200, minHeight: 72, autoHeight: false, view: FileView })

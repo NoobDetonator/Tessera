@@ -1,10 +1,16 @@
 /** The Tessera panel: board sidebar, top bar, canvas and app-level shortcuts. */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { newId, type CanvasEdge, type CanvasNode, type CardKind } from '../shared/canvas.ts'
+import { newId, type CanvasEdge, type CanvasNode, type CardKind, type Rect } from '../shared/canvas.ts'
 import { isSingleUrl, normalizeHex } from '../shared/cardtext.ts'
+import { columnMembers, groupDescendants } from '../shared/classify.ts'
+import { collapsedMembers, columnInsertIndex, columnLayoutChange, COLUMN_HEAD, groupAsColumn, insertIntoColumn, kindsOf, owningColumn, removeFromColumns, topNodeAt } from '../shared/structure.ts'
+import { composeChanges } from '../shared/change.ts'
+import { api } from './bridge.ts'
+import { EdgeBar, Minimap, SelectionBar } from './bars.tsx'
 import type { Change } from '../shared/change.ts'
 import type { BoardInfo } from '../shared/protocol.ts'
-import { CanvasView, type CanvasApi } from './CanvasView.tsx'
+import { snapToGrid } from '../shared/geometry.ts'
+import { CanvasView, type CanvasApi, type ViewState } from './CanvasView.tsx'
 import type { CardShell } from './cards.tsx'
 import { addFiles, addLink, makeColor, makeDocument, makeNote, makeTodo, type Point } from './create.ts'
 import { Dialog, DocumentEditor, Lightbox, Toolbar } from './overlays.tsx'
@@ -74,7 +80,7 @@ async function askNewBoard(store: TesseraStore, t: T): Promise<void> {
 }
 
 /** Kinds on the left toolbar. */
-const TOOL_KINDS: readonly CardKind[] = ['note', 'document', 'todo', 'link', 'image', 'file', 'color']
+const TOOL_KINDS: readonly CardKind[] = ['note', 'document', 'todo', 'link', 'image', 'file', 'color', 'board', 'column', 'frame']
 
 function Sidebar({ store, t }: { store: TesseraStore; t: T }): ReactNode {
   const boards = useTessera(store, state => state.boards)
@@ -214,6 +220,8 @@ export function App({ store, t }: { store: TesseraStore; t: T }): ReactNode {
   const [documentId, setDocumentId] = useState<string | undefined>(undefined)
   const filePicker = useRef<HTMLInputElement>(null)
   const pickAt = useRef<Point>({ x: 0, y: 0 })
+  const [mapView, setMapView] = useState<{ state: ViewState; width: number; height: number } | undefined>(undefined)
+  const hiddenIds = useMemo(() => (doc === undefined ? undefined : collapsedMembers(doc)), [doc])
 
   const shell = useMemo<CardShell>(() => ({
     openDocument: (id) => { setDocumentId(id) },
@@ -228,6 +236,76 @@ export function App({ store, t }: { store: TesseraStore; t: T }): ReactNode {
     },
   }), [store])
 
+  // Keep Tessera's columns stacked as members grow, shrink or disappear. Stays out of undo, since it is derived.
+  useEffect(() => {
+    if (doc === undefined) return
+    let change: Change = {}
+    for (const node of doc.nodes) {
+      if (node.type !== 'group') continue
+      const layout = columnLayoutChange(doc, node)
+      if (layout !== undefined) change = composeChanges(change, layout)
+    }
+    if (Object.keys(change.nodes ?? {}).length > 0) store.commit(change, { undoable: false })
+  }, [doc, store])
+
+  /** What a drag would land in: a Board or a Column under the pointer, or a card when Shift makes a new column. */
+  const dropTargetAt = useCallback((ids: readonly string[], world: Point, shift: boolean): string | undefined => {
+    const current = store.state.doc
+    if (current === undefined) return undefined
+    const moving = new Set(ids)
+    if (current.nodes.some(node => moving.has(node.id) && node.type === 'group')) return undefined
+    const under = topNodeAt(current, world, moving, collapsedMembers(current))
+    if (under === undefined) return undefined
+    const kind = kindsOf(current).get(under.id)
+    if (kind === 'board') return under.id
+    if (kind === 'column') return under.id
+    const holder = owningColumn(current, under.id)
+    if (holder !== undefined) return holder.id
+    return shift && under.type !== 'group' && ids.length === 1 ? under.id : undefined
+  }, [store])
+
+  const onDropCards = useCallback((ids: readonly string[], world: Point, event: PointerEvent, rects: ReadonlyMap<string, Rect>): boolean => {
+    const current = store.state.doc
+    if (current === undefined) return false
+    const target = dropTargetAt(ids, world, event.shiftKey)
+    const targetNode = target === undefined ? undefined : current.nodes.find(node => node.id === target)
+    const kinds = kindsOf(current)
+    const positions: Change = { nodes: Object.fromEntries(ids.flatMap((id) => {
+      const node = current.nodes.find(item => item.id === id), rect = rects.get(id)
+      return node === undefined || rect === undefined ? [] : [[id, { ...node, x: rect.x, y: rect.y }]]
+    })) }
+    if (targetNode !== undefined) {
+      const kind = kinds.get(targetNode.id)
+      if (kind === 'board' && typeof targetNode.file === 'string') {
+        const destination = targetNode.file
+        void store.transfer(destination, ids).then(() => { store.notify(t('board.moved')) }).catch((error: Error) => { store.notify(error.message) })
+        return true
+      }
+      if (kind === 'column') {
+        const index = columnInsertIndex(current, targetNode, world.y, ids)
+        store.commit(insertIntoColumn(current, targetNode.id, ids, index), { label: t('card.column') })
+        return true
+      }
+      const made = groupAsColumn(current, [targetNode.id, ...ids], '')
+      if (made !== undefined) {
+        store.commit(made.change, { label: t('card.column') })
+        store.select(new Set([made.id]))
+        return true
+      }
+    }
+    // Dragged clear of its column: leave it, and keep the spot it was dropped on.
+    if (ids.some(id => owningColumn(current, id) !== undefined)) {
+      const left = removeFromColumns(current, ids)
+      store.commit(composeChanges(left, positions), { label: t('card.column') })
+      return true
+    }
+    return false
+  }, [store, t, dropTargetAt])
+
+  const onViewChange = useCallback((state: ViewState, viewport: { width: number; height: number }) => {
+    setMapView({ state, ...viewport })
+  }, [])
+
   /** Create a card of a toolbar kind at a board position. */
   const place = useCallback((kind: CardKind, at: Point) => {
     const add = (node: CanvasNode, edit: boolean): void => {
@@ -240,6 +318,26 @@ export function App({ store, t }: { store: TesseraStore; t: T }): ReactNode {
       case 'document': { const node = makeDocument(at); add(node, false); setDocumentId(node.id); return }
       case 'todo': add(makeTodo(at), false); return
       case 'color': add(makeColor(at), false); return
+      case 'column': {
+        const id = newId()
+        const column: CanvasNode = { id, type: 'group', x: snapToGrid(at.x), y: snapToGrid(at.y), width: 280, height: COLUMN_HEAD + 12, tessera: { kind: 'column', items: [] } }
+        add(column, false)
+        return
+      }
+      case 'frame': {
+        const id = newId()
+        const frame: CanvasNode = { id, type: 'group', x: snapToGrid(at.x), y: snapToGrid(at.y), width: 480, height: 320, tessera: { kind: 'frame' } }
+        store.commit({ nodes: { [id]: frame }, order: [id, ...(store.state.doc?.nodes.map(node => node.id) ?? [])] }, { label: t('card.frame') })
+        store.select(new Set([id]))
+        return
+      }
+      case 'board':
+        void store.ask({ title: t('card.board'), placeholder: t('prompt.boardTitle') }).then(async (title) => {
+          if (title === null || title.trim() === '') return
+          const created = await api.createBoard(title.trim())
+          add({ id: newId(), type: 'file', file: created.path, x: snapToGrid(at.x), y: snapToGrid(at.y), width: 280, height: 208, tessera: { kind: 'board' } }, false)
+        })
+        return
       case 'link':
         void store.ask({ title: t('card.link'), inputType: 'url', placeholder: 'https://' }).then((url) => {
           if (url === null || url.trim() === '') return
@@ -277,9 +375,11 @@ export function App({ store, t }: { store: TesseraStore; t: T }): ReactNode {
 
   const clipOf = useCallback((): ClipboardCards | undefined => {
     const { doc: current } = store.state
-    const nodes = selectedCards()
-    if (current === undefined || nodes.length === 0) return undefined
-    const ids = new Set(nodes.map(node => node.id))
+    const picked = selectedCards()
+    if (current === undefined || picked.length === 0) return undefined
+    const ids = new Set(picked.map(node => node.id))
+    for (const node of picked) if (node.type === 'group') for (const child of groupDescendants(current, node)) ids.add(child.id)
+    const nodes = current.nodes.filter(node => ids.has(node.id))
     return { nodes, edges: current.edges.filter(edge => ids.has(edge.fromNode) && ids.has(edge.toNode)) }
   }, [store, selectedCards])
 
@@ -349,6 +449,17 @@ export function App({ store, t }: { store: TesseraStore; t: T }): ReactNode {
         if (selection.size > 0) { event.preventDefault(); store.deleteNodes(selection) }
         return
       }
+      if (key === 'tab' && (event.target as HTMLElement).dataset.testid === 'tessera-canvas') {
+        const cards = [...(store.state.doc?.nodes ?? [])].filter(node => hiddenIds?.has(node.id) !== true).sort((a, b) => a.y - b.y || a.x - b.x)
+        const current = [...store.state.selection][0]
+        const index = cards.findIndex(node => node.id === current)
+        const next = cards[index + (event.shiftKey ? -1 : 1)] ?? (index === -1 ? cards[0] : undefined)
+        if (next === undefined) return // past the last card, so focus moves on as usual
+        event.preventDefault()
+        store.select(new Set([next.id]))
+        canvas.current?.centerOn(next)
+        return
+      }
       if (key === 'escape') {
         store.setEditing(undefined)
         store.select(new Set())
@@ -415,7 +526,7 @@ export function App({ store, t }: { store: TesseraStore; t: T }): ReactNode {
       document.removeEventListener('paste', onPaste)
       window.removeEventListener('pointermove', onMove)
     }
-  }, [store, clipOf, pasteCards, selectedCards, toggleLock])
+  }, [store, clipOf, pasteCards, selectedCards, toggleLock, hiddenIds])
 
   const openMenu = useCallback((event: { x: number; y: number; world: { x: number; y: number }; target?: string; edge?: string }) => {
     const entries: MenuEntry[] = []
@@ -509,6 +620,10 @@ export function App({ store, t }: { store: TesseraStore; t: T }): ReactNode {
                   apiRef={canvas}
                   onContextMenu={openMenu}
                   onDropData={onDropData}
+                  onDropCards={onDropCards}
+                  dropTargetAt={dropTargetAt}
+                  onViewChange={onViewChange}
+                  hiddenIds={hiddenIds}
                   placeKind={{ active: armed !== undefined, place: (world) => { if (armed !== undefined) { setArmed(undefined); place(armed, world) } } }}
                 />
                 <Toolbar
@@ -522,6 +637,9 @@ export function App({ store, t }: { store: TesseraStore; t: T }): ReactNode {
                   }}
                   onKeyboard={(kind) => { if (canvas.current !== null) place(kind, canvas.current.screenCenter()) }}
                 />
+                <SelectionBar store={store} t={t} />
+                <EdgeBar store={store} t={t} />
+                <Minimap store={store} canvas={canvas} view={mapView} t={t} />
               </div>
             ) : <div className="t-empty" aria-busy="true" />}
           </>

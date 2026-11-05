@@ -125,6 +125,7 @@ export class TesseraStore {
   private measureFrame: number | undefined
   private disposed = false
   private dialogDone: ((value: string | null) => void) | undefined
+  private readonly boardWatchers = new Map<string, Set<() => void>>()
   /** Set by the shell when a Tessera event should pull the panel forward. */
   private wasConnected = false
 
@@ -198,7 +199,16 @@ export class TesseraStore {
     }
   }
 
+  /** Call back whenever another board changes, for live Board card previews. */
+  watchBoard(path: string, callback: () => void): () => void {
+    let set = this.boardWatchers.get(path)
+    if (set === undefined) { set = new Set(); this.boardWatchers.set(path, set) }
+    set.add(callback)
+    return () => { set.delete(callback) }
+  }
+
   private onChangeEvent(event: Extract<ServerEvent, { type: 'change' }>): void {
+    for (const callback of this.boardWatchers.get(event.path) ?? []) callback()
     if (event.path !== this.state.path || this.state.doc === undefined) return
     const gap = event.rev !== this.lastRev + 1
     this.lastRev = event.rev
@@ -249,9 +259,31 @@ export class TesseraStore {
       return
     }
     if (this.state.path !== undefined) await this.settle()
-    this.set({ path, doc: undefined, loadError: undefined, selection: EMPTY, selectedEdge: undefined, editing: undefined, breadcrumbs: trail ?? [path], filterTags: [], focusMode: false })
+    this.set({ path, doc: undefined, loadError: undefined, selection: EMPTY, selectedEdge: undefined, editing: undefined, breadcrumbs: trail ?? this.trailTo(path), filterTags: [], focusMode: false })
     writeLocal(LAST_BOARD_KEY, path)
     await this.reload(path)
+  }
+
+  /** A path from a top-level board down to this one, following Board cards. */
+  private trailTo(path: string): string[] {
+    const parentOf = new Map<string, string>()
+    for (const board of this.state.boards) for (const child of board.children) if (!parentOf.has(child) && child !== board.path) parentOf.set(child, board.path)
+    const trail = [path]
+    let current = parentOf.get(path)
+    while (current !== undefined && !trail.includes(current)) {
+      trail.unshift(current)
+      current = parentOf.get(current)
+    }
+    return trail
+  }
+
+  /** Move cards onto another board. The Host applies it as one undo step. */
+  async transfer(to: string, ids: readonly string[]): Promise<void> {
+    const { path } = this.state
+    if (path === undefined) return
+    await this.settle()
+    await api.request('/board/transfer', { from: path, to, ids })
+    this.select(EMPTY)
   }
 
   /** Wait until queued edits have reached the Host. */

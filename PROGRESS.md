@@ -2,7 +2,7 @@
 
 **Pinned Harness version:** `@deepseek-ai/dsh@0.2.2-rc.1` (tag `dsh-v0.2.2-rc.1`, the npm `latest` when work started).
 
-**Status:** Phases 1 and 2 done. Working on Phase 3.
+**Status:** Phases 1 to 3 done. Working on Phase 4.
 
 Open items and assumptions are in [QUESTIONS.md](QUESTIONS.md). The design is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -12,8 +12,8 @@ Open items and assumptions are in [QUESTIONS.md](QUESTIONS.md). The design is in
 |---|---|---|
 | 1. Foundations | Done, tag `phase-1` | Browser checks in `e2e/phase-1.mjs` |
 | 2. Card types | Done, tag `phase-2` | Browser checks in `e2e/phase-2.mjs` |
-| 3. Structure | Next | |
-| 4. Agent tools, skill, Ask the agent | Not started | |
+| 3. Structure | Done, tag `phase-3` | Browser checks in `e2e/phase-3.mjs`, including 2,000 cards |
+| 4. Agent tools, skill, Ask the agent | Next | |
 | 5. Power features | Not started | |
 | 6. Extras | Not started | |
 
@@ -58,6 +58,29 @@ Open items and assumptions are in [QUESTIONS.md](QUESTIONS.md). The design is in
 - Actually playing a YouTube or Vimeo video. The test confirms the play button appears, but not the embedded player.
 - "Open with system app". The test run has no desktop to open it on, so only the refusal rules are in place, and the route has no test yet.
 
+## Phase 3
+
+**Built:** Column (drag in and out, reorder, collapse, Shift+drop to create, palette export), Frame (cards move with it, pointers pass through its body), nested Board (mini-preview that updates live, breadcrumbs, drop a card to move it inside as one undo across both files, nested sidebar tree), edge styling (straight, curved, orthogonal, dashed, arrowheads, label, color), the selection bar (color, fill or strip, tags, lock, align, distribute, group), the minimap, and Tab navigation between cards.
+
+**Measured with 2,000 cards and 285 edges** in headless Chromium, software rendered, on this machine:
+
+| Measure | Result |
+|---|---|
+| Open to first card | 712 ms |
+| Cards in the DOM, zoomed in | 9 of 2,000 |
+| Cards in the DOM, fit to all | 2,000, drawn as plain boxes below 30% zoom |
+| Pan, zoomed in | median 16.7 ms a frame, p95 16.8 ms, worst 33 ms |
+| Pan, fit to all | median 16.7 ms a frame, p95 33 ms, worst 267 ms |
+
+These are from one run, so treat them as a rough indication. The 267 ms outlier in the zoomed-out case means an occasional visible hitch, which I did not chase down.
+
+**Bugs the smoke tests caught, now fixed:**
+- A Color card could not be selected or dragged, because its swatch took the click. Click now selects, and double-click opens the picker.
+
+**Not verified:**
+- Pinch zoom and trackpad panning on real hardware. The tests send synthetic wheel events.
+- Double-click on a Color card opening the system color picker. The picker is an OS dialog the test cannot see.
+
 ## Next step
 
-Phase 3: Column, Frame, nested Board with breadcrumbs, edges, guides, minimap, and a measured 1,000-card performance test.
+Phase 4: the eleven agent tools, the skill, "Ask the agent", and the end-to-end test with the real model.

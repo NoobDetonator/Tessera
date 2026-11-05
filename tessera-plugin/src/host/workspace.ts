@@ -86,7 +86,7 @@ export function workspaceRoutes(store: BoardStore, root: string, web: () => WebF
     const title = typeof body.title === 'string' && body.title.trim() !== '' ? body.title : 'Untitled'
     const path = await store.freePath(title)
     await store.create(path, { nodes: [], edges: [] })
-    return { path }
+    return { path, title: titleOf(path) }
   })
   routes.set('POST /board/rename', async ({ json }) => {
     const body = await json()

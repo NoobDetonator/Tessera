@@ -74,7 +74,17 @@ Files are served inline only for images, audio, video, PDF and plain text. Anyth
 
 ## Rendering
 
-Cards are DOM elements positioned inside one CSS-transformed world element. Panning and zooming write that transform directly, without a React render. The render set is recalculated only when the view leaves a margin around what is already mounted, so off-screen cards are not in the DOM. A drag updates live rectangles in local state and commits one `Change` on release, which makes it one undo step.
+Cards are DOM elements positioned inside one CSS-transformed world element. Panning and zooming write that transform directly, without a React render. The render set is recalculated only when the view leaves a margin around what is already mounted, so off-screen cards are not in the DOM. Below 30% zoom, cards draw as plain boxes. A drag updates live rectangles in local state and commits one `Change` on release, which makes it one undo step.
+
+Card views read the document from the store instead of receiving it as a prop, so one edit re-renders only the card it touched.
+
+## Columns and Frames
+
+A Column's order lives in `tessera.items`. A layout pass stacks the members and sizes the column whenever the document changes, and stays out of undo because it is derived. It only touches columns with `items`, so a plain group that merely looks like a column is never moved.
+
+A Frame owns cards by geometry: the smallest group containing a card's center. Its body lets pointers through, so box-select and double-click still work inside it. You select or drag it by its title.
+
+Moving cards to another board changes two files, so the undo entry on the source board carries the target board's inverse too. One undo restores both.
 
 ## Testing
 

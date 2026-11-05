@@ -3,9 +3,10 @@
  * guides, edges and virtualized card rendering.
  */
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { boundsOf, intersects, newId, type CanvasDoc, type CanvasEdge, type CanvasNode, type EdgeSide, type Rect } from '../shared/canvas.ts'
+import { boundsOf, intersects, newId, type CanvasEdge, type CanvasNode, type CardKind, type EdgeSide, type Rect } from '../shared/canvas.ts'
 import { cardKind, groupDescendants } from '../shared/classify.ts'
 import { routeEdge, sideCenter, snapMove, snapToGrid, type Guide } from '../shared/geometry.ts'
+import { COLUMN_COLLAPSED_HEIGHT, kindsOf, visualRect } from '../shared/structure.ts'
 import { cardTypeOf, type CardShell } from './cards.tsx'
 import type { TesseraStore } from './store.ts'
 import { useTessera } from './store.ts'
@@ -13,6 +14,8 @@ import { useTessera } from './store.ts'
 const MIN_ZOOM = 0.1
 const MAX_ZOOM = 4
 const DOT_SPACING = 24
+/** Below this zoom text is unreadable anyway, so cards draw as plain boxes. */
+const LOD_ZOOM = 0.3
 
 export interface ViewState { x: number; y: number; z: number }
 
@@ -65,7 +68,7 @@ type Interaction =
 
 interface CardFrameProps {
   node: CanvasNode
-  doc: CanvasDoc
+  kind: CardKind
   rect: Rect
   store: TesseraStore
   selected: boolean
@@ -73,20 +76,24 @@ interface CardFrameProps {
   editing: boolean
   dimmed: boolean
   dragging: boolean
+  dropTarget: boolean
+  /** Far zoomed out: draw a plain box. */
+  lod: boolean
   t: (key: string) => string
   shell: CardShell
 }
 
-const CardFrame = memo(function CardFrame({ node, doc, rect, store, selected, soloSelected, editing, dimmed, dragging, t, shell }: CardFrameProps) {
-  const kind = cardKind(node, doc)
+const CardFrame = memo(function CardFrame({ node, kind, rect, store, selected, soloSelected, editing, dimmed, dragging, dropTarget, lod, t, shell }: CardFrameProps) {
   const type = cardTypeOf(kind)
   const bodyRef = useRef<HTMLDivElement>(null)
   const locked = node.tessera?.locked === true
   const color = resolveColor(node.color)
   const style = node.tessera?.colorStyle ?? 'strip'
   const collapsed = kind === 'column' && node.tessera?.collapsed === true
+  const group = node.type === 'group'
+  const plain = lod && !group && !editing
   // Only cards Tessera wrote follow their content. A card from a plain file keeps its stored height until edited, so opening a board never rewrites it.
-  const autoHeight = type.autoHeight && node.type === 'text' && node.tessera !== undefined
+  const autoHeight = type.autoHeight && node.type === 'text' && node.tessera !== undefined && !plain
 
   useLayoutEffect(() => {
     if (!autoHeight || dragging) return
@@ -108,8 +115,13 @@ const CardFrame = memo(function CardFrame({ node, doc, rect, store, selected, so
   if (editing) classes.push('t-editing')
   if (dimmed) classes.push('t-dimmed')
   if (dragging) classes.push('t-dragging')
+  if (dropTarget) classes.push('t-drop-target')
+  if (collapsed) classes.push('t-collapsed')
+  if (plain) classes.push('t-lod')
   if (color !== undefined) classes.push(style === 'full' ? 't-color-full' : 't-color-strip')
   const tags = Array.isArray(node.tessera?.tags) ? node.tessera.tags : []
+  const showHandles = soloSelected && !locked && !editing
+  const widthOnly = autoHeight || type.widthOnly === true
   return (
     <div
       ref={bodyRef}
@@ -122,16 +134,18 @@ const CardFrame = memo(function CardFrame({ node, doc, rect, store, selected, so
       style={{
         transform: `translate(${rect.x}px, ${rect.y}px)`,
         width: rect.width,
-        ...(autoHeight ? {} : { height: collapsed ? undefined : rect.height }),
+        ...(autoHeight ? {} : { height: collapsed ? COLUMN_COLLAPSED_HEIGHT : rect.height }),
         ...(color !== undefined ? { '--t-card-color': color } : {}),
       } as React.CSSProperties}
     >
-      <div className="t-card-body">
-        <View node={node} doc={doc} store={store} editing={editing} selected={selected} t={t} shell={shell} />
-        {tags.length > 0 ? <div className="t-tags">{tags.map(tag => <span key={tag} className="t-tag">{tag}</span>)}</div> : null}
-      </div>
-      {locked ? <span className="t-lock" aria-label={t('card.locked')} title={t('card.locked')}>🔒</span> : null}
-      {soloSelected && !locked && !editing ? <Handles auto={autoHeight} /> : null}
+      {plain ? null : (
+        <div className="t-card-body">
+          <View node={node} store={store} editing={editing} selected={selected} t={t} shell={shell} />
+          {tags.length > 0 ? <div className="t-tags">{tags.map(tag => <span key={tag} className="t-tag">{tag}</span>)}</div> : null}
+        </div>
+      )}
+      {locked && !plain ? <span className="t-lock" aria-label={t('card.locked')} title={t('card.locked')}>🔒</span> : null}
+      {showHandles ? <Handles auto={widthOnly} /> : null}
       {soloSelected && !editing ? <Anchors /> : null}
     </div>
   )
@@ -196,7 +210,10 @@ export interface CanvasViewProps {
   shell: CardShell
   apiRef: React.RefObject<CanvasApi | null>
   onContextMenu: (event: { x: number; y: number; world: { x: number; y: number }; target?: string; edge?: string }) => void
-  onDropCards?: (ids: string[], world: { x: number; y: number }, event: PointerEvent) => boolean
+  /** A drag ended. Return true when the drop was handled, so the plain move is skipped. */
+  onDropCards?: (ids: readonly string[], world: { x: number; y: number }, event: PointerEvent, rects: ReadonlyMap<string, Rect>) => boolean
+  /** What a drag would land in at this point, for the highlight. */
+  dropTargetAt?: (ids: readonly string[], world: { x: number; y: number }, shift: boolean) => string | undefined
   onViewChange?: (view: ViewState, viewport: { width: number; height: number }) => void
   dimmedIds?: ReadonlySet<string> | undefined
   hiddenIds?: ReadonlySet<string> | undefined
@@ -207,7 +224,7 @@ export interface CanvasViewProps {
   onDropData?: (data: DataTransfer, world: { x: number; y: number }) => void
 }
 
-export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards, onViewChange, dimmedIds, hiddenIds, placeKind, afterMove, onDropData }: CanvasViewProps): ReactNode {
+export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards, dropTargetAt, onViewChange, dimmedIds, hiddenIds, placeKind, afterMove, onDropData }: CanvasViewProps): ReactNode {
   const doc = useTessera(store, state => state.doc)
   const path = useTessera(store, state => state.path)
   const selection = useTessera(store, state => state.selection)
@@ -230,6 +247,9 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
   const [edgeDraft, setEdgeDraft] = useState<{ d: string } | undefined>(undefined)
   const [panning, setPanning] = useState(false)
   const [zoomPercent, setZoomPercent] = useState(100)
+  const [lod, setLod] = useState(false)
+  const [dropId, setDropId] = useState<string | undefined>(undefined)
+  const kinds = useMemo(() => (doc === undefined ? new Map<string, CardKind>() : kindsOf(doc)), [doc])
 
   const syncVisible = useCallback(() => {
     const root = rootRef.current
@@ -262,6 +282,7 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
         frame.current = undefined
         syncVisible()
         setZoomPercent(Math.round(view.current.z * 100))
+        setLod(view.current.z < LOD_ZOOM)
         onViewChange?.(view.current, { width: root.clientWidth, height: root.clientHeight })
       })
     }
@@ -402,8 +423,9 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
 
   const rectOf = useCallback((id: string): Rect | undefined => overrides.get(id) ?? docRef.current?.nodes.find(node => node.id === id), [overrides])
 
-  const rectIndex = useMemo(() => new Map(doc?.nodes.map(node => [node.id, node as Rect]) ?? []), [doc])
+  const rectIndex = useMemo(() => new Map(doc?.nodes.map(node => [node.id, visualRect(node)]) ?? []), [doc])
   const rectLookup = useCallback((id: string): Rect | undefined => overrides.get(id) ?? rectIndex.get(id), [overrides, rectIndex])
+  // The minimap and edge layer care about what is drawn, so a collapsed column counts as its header.
 
   const finishEdge = useCallback((target: HTMLElement | null, from: string, fromSide: EdgeSide) => {
     const cardElement = target?.closest<HTMLElement>('[data-card-id]') ?? null
@@ -453,7 +475,7 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
       interaction.current = {
         kind: 'resize', id, handle: handleElement.dataset.handle as Handle, startWorld: world, origin: node,
         aspect: type.aspectLock === true ? node.width / Math.max(1, node.height) : undefined,
-        minW: type.minWidth, minH: type.minHeight, autoHeight: type.autoHeight && node.type === 'text' && node.tessera !== undefined,
+        minW: type.minWidth, minH: type.minHeight, autoHeight: (type.autoHeight && node.type === 'text' && node.tessera !== undefined) || type.widthOnly === true,
       }
       root.setPointerCapture(event.pointerId)
       return
@@ -527,6 +549,7 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
         for (const [id, rect] of state.origins) next.set(id, { ...rect, x: rect.x + sx, y: rect.y + sy })
         setOverrides(next)
         setGuides(snapped.guides)
+        setDropId(dropTargetAt?.(state.ids, world, event.shiftKey))
         return
       }
       case 'resize': {
@@ -603,9 +626,10 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
       case 'drag': {
         const current = docRef.current
         setGuides([])
+        setDropId(undefined)
         if (current === undefined) { setOverrides(new Map()); return }
         const world = toWorld(event.clientX, event.clientY)
-        if (onDropCards?.(state.ids, world, event.nativeEvent) === true) { setOverrides(new Map()); return }
+        if (onDropCards?.(state.ids, world, event.nativeEvent, overrides) === true) { setOverrides(new Map()); return }
         const nodes: Record<string, CanvasNode> = {}
         for (const id of state.ids) {
           const rect = overrides.get(id)
@@ -680,7 +704,7 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
     if (doc === undefined) return []
     return doc.nodes.filter((node) => {
       if (hiddenIds?.has(node.id) === true) return false
-      const rect = overrides.get(node.id) ?? node
+      const rect = overrides.get(node.id) ?? visualRect(node)
       return intersects(rect, visible) || selection.has(node.id) || overrides.has(node.id)
     })
   }, [doc, visible, overrides, selection, hiddenIds])
@@ -745,8 +769,10 @@ export function CanvasView({ store, t, shell, apiRef, onContextMenu, onDropCards
             <CardFrame
               key={node.id}
               node={node}
-              doc={doc}
+              kind={kinds.get(node.id) ?? 'note'}
               rect={live ?? node}
+              dropTarget={dropId === node.id}
+              lod={lod}
               store={store}
               selected={selection.has(node.id)}
               soloSelected={selection.size === 1 && selection.has(node.id)}
