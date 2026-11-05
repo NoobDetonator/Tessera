@@ -66,6 +66,8 @@ export interface StoreEvents {
   'board-removed': [{ path: string }]
 }
 
+const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
+
 export class TesseraError extends Error {
   override readonly name = 'TesseraError'
   readonly code: string
@@ -269,6 +271,8 @@ export class BoardStore extends EventEmitter<StoreEvents> {
         top.inverse = composeChanges(inverse, top.inverse)
         top.forward = composeChanges(top.forward, change)
         top.label = meta.label ?? top.label
+        // Created and removed inside one step (an abandoned empty note): nothing left to undo.
+        if (same(top.inverse.nodes, top.forward.nodes) && same(top.inverse.edges, top.forward.edges)) board.undo.pop()
       } else {
         board.undo.push({ inverse, forward: change, label: meta.label, coalesce: meta.coalesce })
       }

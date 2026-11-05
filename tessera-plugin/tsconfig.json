@@ -3,7 +3,11 @@
     "target": "ES2023",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "jsx": "react-jsx",
     "strict": true,
     "noUncheckedIndexedAccess": true,
@@ -13,13 +17,13 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["node", "react"],
-    "typeRoots": ["../tessera-build/node_modules/@types"],
-    "baseUrl": ".",
-    "paths": {
-      "react": ["../tessera-build/node_modules/@types/react"],
-      "react/jsx-runtime": ["../tessera-build/node_modules/@types/react/jsx-runtime"]
-    }
+    "types": [
+      "node",
+      "react"
+    ]
   },
-  "include": ["src", "test"]
+  "include": [
+    "src",
+    "test"
+  ]
 }

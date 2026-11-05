@@ -1,0 +1,35 @@
+{
+  "extends": "../tessera-plugin/tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "typeRoots": [
+      "./node_modules/@types"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "react": [
+        "./node_modules/@types/react"
+      ],
+      "react/jsx-runtime": [
+        "./node_modules/@types/react/jsx-runtime.d.ts"
+      ],
+      "@deepseek-ai/cordis": [
+        "./node_modules/@deepseek-ai/cordis"
+      ],
+      "@deepseek-ai/schemastery": [
+        "./node_modules/@deepseek-ai/schemastery"
+      ],
+      "@deepseek-ai/dsh-tools": [
+        "./node_modules/@deepseek-ai/dsh-tools"
+      ],
+      "@deepseek-ai/dsh-host-webserver": [
+        "./node_modules/@deepseek-ai/dsh-host-webserver"
+      ]
+    }
+  },
+  "include": [
+    "../tessera-plugin/src",
+    "../tessera-plugin/test"
+  ]
+}

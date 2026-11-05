@@ -18,6 +18,7 @@ const clientExternals = [
 
 const hostOptions = {
   absWorkingDir: plugin,
+  tsconfigRaw: '{}', // tsconfig paths point at type packages and must not pull them into the bundle
   entryPoints: ['src/host/index.ts'],
   outfile: 'lib/index.js',
   bundle: true,
@@ -31,6 +32,7 @@ const hostOptions = {
 
 const clientOptions = {
   absWorkingDir: plugin,
+  tsconfigRaw: '{}',
   entryPoints: ['src/client/index.tsx'],
   outfile: 'lib/client.js',
   bundle: true,
