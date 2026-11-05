@@ -18,7 +18,7 @@ before(async () => {
 })
 after(async () => {
   await store.stop()
-  await rm(dir, { recursive: true, force: true })
+  await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })
 })
 
 async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 3000): Promise<void> {
