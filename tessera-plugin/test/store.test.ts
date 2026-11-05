@@ -169,14 +169,14 @@ test('a corrupt external file is kept aside and memory survives', async () => {
 
 test('a failed save keeps memory, reports, and retries', async () => {
   const path = 'locked/file.canvas'
-  const local = new BoardStore(dir, 5)
+  const local = new BoardStore(dir, 60_000) // a short debounce could save before the folder is broken
   await local.create(path, { nodes: [note('a')], edges: [] })
   await local.read(path)
   const errors: string[] = []
   local.on('save-error', ({ message }) => { errors.push(message) })
   await local.apply(path, { nodes: { a: note('a', 'kept') } }, { origin: 'user' })
   // Replacing the parent folder with a file makes the write fail.
-  await rm(join(dir, 'locked'), { recursive: true })
+  await rm(join(dir, 'locked'), { recursive: true, maxRetries: 10, retryDelay: 20 }) // Windows reports ENOTEMPTY while the watcher holds the folder
   await writeFile(join(dir, 'locked'), 'in the way')
   await local.flush(path)
   assert.ok(errors.length > 0)
