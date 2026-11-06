@@ -124,6 +124,10 @@ These are from one run, so treat them as a rough indication. The 267 ms outlier 
 **Found by reading the screenshots, now fixed:**
 - Neighboring frames could show at the edge of a slide. Only the current frame's contents are on screen now.
 
+**Found in a real-model run, now fixed:**
+- After you declined a delete, the agent refused to delete even when you asked again in a later message, because the tool description said "Never retry a declined delete". The tool and skill now say not to retry on its own, and to call again when you ask. Each call still asks you in the UI. Earlier runs had passed only because the model read the rule more loosely.
+- A test race: the history timeline check read the panel before its list had loaded. It was confirmed by delaying the response on purpose (the old check failed every time, the fixed one passed), so it was a test bug, not a product bug.
+
 ## Final coverage pass
 
 `e2e/final.mjs` and `e2e/config.mjs` cover what the phase tests had not exercised in a browser:
@@ -148,9 +152,13 @@ These are from one run, so treat them as a rough indication. The 267 ms outlier 
 | Unit tests (`node --test`) | All pass |
 | Strict type check | Clean |
 | Browser suites without a model | 247 checks pass |
-| Real-model suites | 22 checks pass, on two runs |
+| Real-model suites | 22 checks pass on the final code |
 
-The real-model acceptance test passed on both runs, with the same three correct themes (45 s and 49 s). The automated suites have only ever run on this Windows machine in headless Chromium.
+**The real-model acceptance test** ran five times in all. Every run sorted the 30 cards into the right three themes, between 34 and 49 seconds, and one undo put every card back.
+- One run failed later, in the delete-confirmation part, from the wording bug above.
+- The final code passed twice in a row, and the read-only run passed too.
+
+The automated suites have only ever run on this Windows machine in headless Chromium.
 
 ## What needs you
 

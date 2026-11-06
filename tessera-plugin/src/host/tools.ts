@@ -417,7 +417,7 @@ export function toolSpecs(deps: ToolDeps): ToolSpec[] {
     },
     {
       name: 'tessera_delete_cards',
-      description: 'Delete cards and their edges. The user must confirm in the UI, so this waits for an answer and can come back with declined: true. Never retry a declined delete.',
+      description: 'Delete cards and their edges. The user must confirm in the UI, so this waits for an answer and can come back with declined: true. After a decline, do not try again on your own; if the user asks for the delete again, call this again, and they will be asked again in the UI.',
       parameters: {
         path: { type: 'string', required: true },
         ids: { ...stringList, required: true },
