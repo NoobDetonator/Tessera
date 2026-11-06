@@ -26,8 +26,8 @@ export function summarize() {
   }
 }
 
-export async function launch({ name, port, withKey = false, env = {}, seed, args = [], boardsDir = 'tessera' } = {}) {
-  installPlugin()
+export async function launch({ name, port, withKey = false, env = {}, seed, args = [], boardsDir = 'tessera', installSpec } = {}) {
+  installPlugin(installSpec)
   const runDir = resolve(projectRoot, '.test-run', name)
   rmSync(runDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
   const boards = join(runDir, boardsDir)

@@ -8,23 +8,37 @@ Built and tested against `@deepseek-ai/dsh@0.2.2-rc.1`. The plugin only declares
 
 You need Node 24.9 or newer, the `dsh` CLI, and `pnpm` on your PATH (`dsh plugin` calls it).
 
-1. Build the plugin:
+1. Add the released package to your Web profile. It is already built, so nothing compiles on your machine:
 
 ```bash
-cd tessera-build && npm install && node build.mjs
+dsh plugin --profile web add https://github.com/NoobDetonator/Tessera/releases/download/v0.1.0/tessera-dsh-tessera-0.1.0.tgz
 ```
 
-2. Add it to your Web profile, from the project root:
-
-```bash
-dsh plugin --profile web add ./tessera-plugin
-```
-
-3. Start the Web UI and click **Tessera** in the sidebar:
+2. Start the Web UI and click **Tessera** in the sidebar:
 
 ```bash
 dsh --profile web
 ```
+
+To remove it later:
+
+```bash
+dsh plugin --profile web remove @tessera/dsh-tessera
+```
+
+### From source
+
+Clone the repository, build the plugin, and add the folder instead of the release:
+
+```bash
+git clone https://github.com/NoobDetonator/Tessera && cd Tessera/tessera-build && npm install && node build.mjs
+```
+
+```bash
+cd .. && dsh plugin --profile web add ./tessera-plugin
+```
+
+### Configuration
 
 Boards are stored in `tessera/`, inside the folder you start `dsh` from. To change that or anything else, add a `config` to the row in your profile's `cordis.patch.yml`:
 
@@ -209,5 +223,15 @@ node e2e/run.mjs final.mjs
 ```
 
 `phase-4.mjs` and `phase-4-readonly.mjs` use the real model and spend a small amount of API credit. They read `DEEPSEEK_API_KEY` from `env.env` in the project root, which git ignores.
+
+To check a release package, pack the plugin and install it into a brand-new dsh home:
+
+```bash
+cd ../tessera-plugin && pnpm pack --pack-destination ../.test-run/pack && cd ../tessera-build
+```
+
+```bash
+node e2e/run.mjs release.mjs ../.test-run/pack/tessera-dsh-tessera-0.1.0.tgz
+```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design, [PROGRESS.md](PROGRESS.md) for what was tested, and [QUESTIONS.md](QUESTIONS.md) for open decisions.

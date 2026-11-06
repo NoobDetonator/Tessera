@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 export const projectRoot = resolve(here, '..')
-export const dshHome = resolve(projectRoot, '.dsh-home')
+// TESSERA_DSH_HOME gives a run its own clean dsh, for testing a fresh install.
+export const dshHome = process.env.TESSERA_DSH_HOME ?? resolve(projectRoot, '.dsh-home')
 export const defaultRunDir = resolve(projectRoot, '.test-run/default')
 const bin = resolve(here, 'node_modules/@deepseek-ai/dsh/lib/bin.js')
 
@@ -37,8 +38,9 @@ export function apiKeyEnv() {
   return { DEEPSEEK_API_KEY: match[1] }
 }
 
-export function installPlugin() {
-  const result = spawnSync(process.execPath, [bin, 'plugin', '--profile', 'web', 'add', resolve(projectRoot, 'tessera-plugin')], {
+/** @param spec - what `dsh plugin add` installs: the plugin folder by default, or a .tgz path or URL. */
+export function installPlugin(spec = resolve(projectRoot, 'tessera-plugin')) {
+  const result = spawnSync(process.execPath, [bin, 'plugin', '--profile', 'web', 'add', spec], {
     cwd: projectRoot, env: containedEnv(), encoding: 'utf8',
   })
   if (result.status !== 0) throw new Error(`plugin add failed:\n${result.stdout}\n${result.stderr}`)

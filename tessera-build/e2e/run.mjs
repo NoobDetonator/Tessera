@@ -11,7 +11,7 @@ if (!script) {
 }
 const build = spawnSync(process.execPath, [resolve(here, '../build.mjs')], { stdio: 'inherit' })
 if (build.status !== 0) process.exit(build.status ?? 1)
-const result = spawnSync(process.execPath, [resolve(here, script)], {
+const result = spawnSync(process.execPath, [resolve(here, script), ...process.argv.slice(3)], {
   stdio: 'inherit',
   env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: resolve(here, '../.pw-browsers') },
 })
